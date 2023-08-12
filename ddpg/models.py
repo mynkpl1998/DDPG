@@ -79,14 +79,16 @@ if __name__ == "__main__":
     obs_dims = 256
     action_dims = 4
     hidden_size = 64
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Testing with {} device".format(device))
 
-    random_obs = torch.rand(2, obs_dims)
-    random_act = torch.rand(2, action_dims)
+    random_obs = torch.rand(2, obs_dims).to(device)
+    random_act = torch.rand(2, action_dims).to(device)
     
     # Test Critic
     critic = Critic(observation_dims=obs_dims,
                     action_dims=action_dims,
-                    hidden_size=hidden_size)
+                    hidden_size=hidden_size).to(device)
 
     out = critic(random_obs, random_act)
     
@@ -94,5 +96,6 @@ if __name__ == "__main__":
     # Test actor
     actor = Actor(observation_dims=obs_dims,
                   action_dims=action_dims,
-                  hidden_size=hidden_size)
+                  hidden_size=hidden_size).to(device)
     out = actor(random_obs)
+
