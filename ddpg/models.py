@@ -43,8 +43,6 @@ class Critic(nn.Module):
     def forward(self,
                 states: torch.FloatTensor,
                 actions: torch.FloatTensor):
-        #print(states.size())
-        #print(actions.size())
         x = torch.cat((states, actions), 1)
         x = x.view(-1, self.observation_dims + self.action_dims)
         return self.critic(x)

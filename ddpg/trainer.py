@@ -17,12 +17,12 @@ from torch.utils.tensorboard import SummaryWriter
 DDPG_DEFAULT_DICT = {
     'env': gym.make("Pendulum-v1"),
     'seed': 258,
-    'replay_size': int(1e5),
-    'polyak': 0.995,
+    'replay_size': int(4e5),
+    'polyak': 0.9995,
     'actor_critic_hidden_size': 256,
     'activation': 'relu',
     'update_batch_size': 256,
-    'update_frequency': 500,
+    'update_frequency': 10,
     'update_iterations': 1,
     'gamma': 0.9,
     'critic_lr':1e-4,
@@ -31,10 +31,10 @@ DDPG_DEFAULT_DICT = {
     'num_training_episodes': int(50e3),
     'exploration_noise_scale': 0.1,
     'warm_up_iters': 5000,
-#    'exploration-noise-scale-final': 0.001,
-#    'num_test_episodes': 30,
-#    'training_warmup_iters': 10000,
-    'max_gradient_norm': 0.5
+    'max_gradient_norm': 0.5,
+    'num_test_episodes': 10,
+    'evaluation_freq_episodes': 10,
+    'normalize_observations': True
 }
 
 class DDPG:
@@ -56,8 +56,12 @@ class DDPG:
                  max_gradient_norm: float,
                  exploration_noise_scale: float,
                  num_training_episodes: int,
-                 warm_up_iters: int):
+                 warm_up_iters: int,
+                 num_test_episodes: int,
+                 evaluation_freq_episodes: int,
+                 normalize_observations: bool):
         
+
         self.__env = env
         self.__seed = seed
         self.__polyak = polyak
@@ -74,10 +78,14 @@ class DDPG:
         self.__n_training_episodes = num_training_episodes
         self.__warm_up_iters = warm_up_iters
         self.__critic_loss_fn = critic_loss
+        self.__n_test_episodes = num_test_episodes
+        self.__evaluation_freq_episodes = evaluation_freq_episodes
+        self.__normalize_observation = normalize_observations
 
         observation_dims = self.env.observation_space.shape[0]
         action_dims = self.env.action_space.shape[0]
         self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.last_mean_test_reward = 0
 
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
@@ -139,6 +147,10 @@ class DDPG:
         return self.__critic
     
     @property
+    def critic_target(self):
+        return self.__critic_tar
+    
+    @property
     def critic_optimizer(self):
         return self.__critic_optimizer
 
@@ -149,6 +161,10 @@ class DDPG:
     @property
     def actor(self):
         return self.__actor
+    
+    @property
+    def actor_target(self):
+        return self.__actor_tar
     
     @property
     def device(self):
@@ -168,7 +184,6 @@ class DDPG:
             self.actor.eval()
             actions_torch = self.actor(states)
             self.actor.train()
-        
         actions = actions_torch.numpy()
         
         # Add noise
@@ -184,23 +199,32 @@ class DDPG:
     
     def critic_soft_update(self,
                            polyak:float):
-        for param, target_param in zip(self.critic.parameters(), self.__critic_tar.parameters()):
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_( polyak * target_param.data + (1 - polyak) * param.data )
     
     def critic_hard_update(self,
                            polyak:float):
-        for param, target_param in zip(self.critic.parameters(), self.__critic_tar.parameters()):
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(param.data)  
         
     def actor_soft_update(self,
                           polyak: float):
-        for param, target_param in zip(self.actor.parameters(), self.__actor_tar.parameters()):
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_( polyak * target_param.data + (1 - polyak) * param.data )
 
     def actor_hard_update(self,
                           polyak: float):
-        for param, target_param in zip(self.actor.parameters(), self.__actor_tar.parameters()):
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_( param.data )
+    
+    def normalize_observation(self, obs: np.array):
+        low = self.env.observation_space.low
+        high = self.env.observation_space.high
+        scale_factor = high - low
+        normalized_obs = np.divide(obs - low, scale_factor)
+        assert normalized_obs.max() <= 1.0
+        assert normalized_obs.min() >= 0.0
+        return normalized_obs
         
     def train_step(self, 
                    batch_size: int):
@@ -234,10 +258,14 @@ class DDPG:
 
             # Calculate target 
             Q_s = None
+            
+            self.critic_target.eval()
+            self.actor_target.eval()
             with torch.no_grad():
-                self.critic.eval()
-                Q_s = self.critic(next_states, self.actor(next_states))
-                self.critic.train()
+                Q_s = self.critic_target(next_states, self.actor_target(next_states))
+            self.critic_target.train()
+            self.actor_target.train()
+
             target = rewards + self.__gamma * dones * Q_s.squeeze(dim=1)
             Q = self.critic(states, actions).squeeze(dim=1)
             
@@ -246,6 +274,11 @@ class DDPG:
             else:
                 critic_loss = F.huber_loss(Q, target, delta=1.0)
             
+            
+            if critic_loss.item() > 300:
+                print("Returns: ", returns.mean(), "Rewards", rewards.mean(), rewards.size(), "Q: ", Q.mean(), "Target mean:", target.mean(), "Loss: ", critic_loss.item())
+            
+
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
             # Clip the gradients
@@ -259,6 +292,7 @@ class DDPG:
             actor_loss.backward()
             # Clip the gradients
             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.__max_gradient_norm)
+            # Update gradients
             self.actor_optimizer.step()
 
             # Update target network weight
@@ -273,10 +307,11 @@ class DDPG:
     def evaluate(self):
 
         episodic_cum_reward = []
-        
-        for _ in range(self.hyperparameters['num-test-episodes']):
-
-            state, info = env.reset()    
+        test_episode = gym.make("Pendulum-v1")
+        for _ in range(self.__n_test_episodes):
+            state, info = test_episode.reset()
+            if self.__normalize_observation:
+                state = self.normalize_observation(state)
             done = False
             cum_reward = 0
 
@@ -284,30 +319,53 @@ class DDPG:
 
                 # Get an action to execute
                 action = self.get_action(torch.from_numpy(state).to(self.device),
-                                        noise=0.0)
+                                         noise=0.0)
             
                 # Perform the action in the environment
-                next_state, reward, terminated, truncated, info = self.__env.step(action[0])
+                next_state, reward, terminated, truncated, info = test_episode.step(action[0])
+                if self.__normalize_observation:
+                    next_state = self.normalize_observation(next_state)
                 cum_reward += reward
 
                 if terminated or truncated:
                     episodic_cum_reward.append(cum_reward)
                     done = True
-                
                 state = next_state
         
         episodic_cum_reward = np.array(episodic_cum_reward)
         return np.mean(episodic_cum_reward)
 
-    def learn2(self,
-               experiment_name: str ):
+    def learn2(self):
         
         # Create a writer object for logging
         curr_timestamp = datetime.datetime.now()
-        writer = SummaryWriter("runs/ddpg/" + self.__env.unwrapped.spec.id + "/" + experiment_name)
+        writer = SummaryWriter("runs/ddpg/" + self.__env.unwrapped.spec.id + "/" + str(curr_timestamp))
 
         # Log hyper-parameters
-        #writer.add_hparams({'critic_loss_fn': self.__critic_loss_fn})
+        hyper_parameters = {
+                'seed': 258,
+                'replay_size': int(4e5),
+                'polyak': 0.9995,
+                'actor_critic_hidden_size': 256,
+                'activation': 'relu',
+                'update_batch_size': 256,
+                'update_frequency': 10,
+                'update_iterations': 1,
+                'gamma': 0.9,
+                'critic_lr':1e-4,
+                'actor_lr': 1e-3,
+                'critic_loss': 'hubber',
+                'num_training_episodes': int(50e3),
+                'exploration_noise_scale': 0.1,
+                'warm_up_iters': 5000,
+                'max_gradient_norm': 0.5,
+                'num_test_episodes': 10,
+                'evaluation_freq_episodes': 10,
+                'normalize_observations': True
+        }
+        writer.add_hparams(hparam_dict=hyper_parameters,
+                           metric_dict={'reward/episode_sum_reward': 0, 
+                                        'reward/mean_test_reward': 0})
 
         # Initialize variables
         total_steps_count = 0
@@ -316,6 +374,8 @@ class DDPG:
 
         for episode in range(0, self.__n_training_episodes):            
             state, info = self.env.reset()
+            if self.__normalize_observation:
+                state = self.normalize_observation(state)
             episode_sum_reward = 0
             done = False
             epsiode_transitions = []
@@ -330,20 +390,23 @@ class DDPG:
                 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = self.__env.step(action[0])
+                if self.__normalize_observation:
+                    next_state = self.normalize_observation(next_state)
                 episode_sum_reward += reward
 
                 t = (state, action[0], reward, next_state, terminated)
                 
                 epsiode_transitions.append(t)
 
-                if truncated or terminated:
+                if truncated or terminated:    
                     done = True
                 
                 state = next_state
 
                 # Update actor and critic
-                if total_steps_count % self.__update_frequency \
+                if total_steps_count % self.__update_frequency == 0 \
                     and total_steps_count > self.__warm_up_iters:
+
                     critic_losses = []
                     actor_losses = []
                     returns_errs = []
@@ -363,7 +426,14 @@ class DDPG:
                     writer.add_scalar("loss/actor", actor_losses.mean(), total_steps_count)
                     writer.add_scalar("returns/estimation_err", returns_errs.mean(), total_steps_count)
                     writer.add_scalar("returns/avg_returns", returns_hist.mean(), total_steps_count)
-                   
+
+                    if not self.critic.training:
+                        print("Critic is not in training mode")
+                    if not self.actor.training:
+                        print("Actor not in training mode")
+
+                    # NOTE: DONOT use training env in evaluation.
+                    # As the training env might be in different state
 
             # Calculate Returns and store in replay buffer
             returns = 0
@@ -385,11 +455,17 @@ class DDPG:
             # Log current replay size
             writer.add_scalar("replay/size", self.__exp_replay.replay_size, episode+1)
             
+            # Evaluate agent performance
+            
+            if (episode + 1) % self.__evaluation_freq_episodes == 0:
+                self.last_mean_test_reward = self.evaluate()
+                writer.add_scalar("reward/mean_test_reward", self.last_mean_test_reward, episode+1)
+            
 
             # Log metrics
             writer.add_scalar("reward/episode_sum_reward", episode_sum_reward, episode+1)
             writer.add_scalar("exploration/noise_scale", exploration_noise_scale, episode+1)            
-            print("Episode: {} Cum Reward: {:.2f} Total Steps: {}.".format(episode+1, episode_sum_reward ,total_steps_count))
+            print("Episode: {} Train Cum Reward: {:.2f} Last Mean Test Cum Reward: {:.2f} Total Steps: {}.".format(episode+1, episode_sum_reward , self.last_mean_test_reward, total_steps_count))
             
 
 
@@ -398,7 +474,7 @@ class DDPG:
 
         # Create a writer object for logging
         curr_timestamp = datetime.datetime.now()
-        writer = SummaryWriter("runs/ddpg/" + self.__env.unwrapped.spec.id + "/" + experiment_name)
+        writer = SummaryWriter("runs/ddpg/" + self.__env.unwrapped.spec.id + "/" + curr_timestamp)
 
         # Initialize learning specific parameters here
         total_steps_count = 0
@@ -458,5 +534,4 @@ class DDPG:
 if __name__ == "__main__":
 
     agent = DDPG(**DDPG_DEFAULT_DICT)
-    
-    agent.learn2(experiment_name="reduce_grad_norm_0.5_50k_episodes")
+    agent.learn2()
