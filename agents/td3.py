@@ -1,6 +1,7 @@
 import optuna
 from typing import Literal, Dict, Any, Optional, Union
 
+import sys
 import torch
 import random
 import datetime
@@ -575,14 +576,18 @@ class TD3:
 
 
     def learn(self,
+              logger_title: str,
               eval_callback: Optional[TrialEvaluationCallback] = None):
         
+        
+
         if self.__enable_wandb_logging:
             # Create a writer object for logging
-            todays_date = datetime.date.today()
-            logger_title = "td3-" + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
+            todays_date = datetime.datetime.now()
+            run_name = self.__class__.__name__ + " " +self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
             writer = wandb.init(project=logger_title,
-                                config=self.get_hyper_parameters())
+                                config=self.get_hyper_parameters(),
+                                name=run_name)
 
         # Initialize variables
         total_steps_count = 0

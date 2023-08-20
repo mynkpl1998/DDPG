@@ -54,4 +54,5 @@ if __name__ == "__main__":
     
     else:
         agent = TD3(**TD3_DEFAULT_PARAMS)
-        agent.learn(eval_callback=None)
+        agent.learn(logger_title='rl_experiments',
+                    eval_callback=None)

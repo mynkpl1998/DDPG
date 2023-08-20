@@ -442,14 +442,16 @@ class DDPG:
 
 
     def learn(self,
+              logger_title: str,
               eval_callback: Optional[TrialEvaluationCallback] = None):
         
         if self.__enable_wandb_logging:
             # Create a writer object for logging
             todays_date = datetime.date.today()
-            logger_title = "ddpg-" + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
+            run_name = self.__class__.__name__ + " " +self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
             writer = wandb.init(project=logger_title,
-                                config=self.get_hyper_parameters())
+                                config=self.get_hyper_parameters(),
+                                name=run_name)
 
         # Initialize variables
         total_steps_count = 0
@@ -511,7 +513,7 @@ class DDPG:
                         writer.log({
                             "loss/critic": critic_losses.mean(),
                             "loss/actor": actor_losses.mean(),
-                            "returns/estimation_err": returns_errs.mean(),
+                            "returns/est_err": returns_errs.mean(),
                             "returns/avg_returns": returns_hist.mean()
                         }, commit=False)
 
