@@ -4,6 +4,7 @@ from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
 
 from agents.ddpg import DDPG, DDPG_DEFAULT_PARAMS, sample_ddpg_params
+from agents.td3 import TD3, TD3_DEFAULT_PARAMS
 
 from utils import TrialEvaluationCallback
 
@@ -52,5 +53,5 @@ if __name__ == "__main__":
         study.optimize(objective, n_trials=N_TRIALS, timeout=TIMEOUT_MINS*60)
     
     else:
-        agent = DDPG(**DDPG_DEFAULT_PARAMS)
+        agent = TD3(**TD3_DEFAULT_PARAMS)
         agent.learn(eval_callback=None)

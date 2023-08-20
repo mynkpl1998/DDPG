@@ -1,5 +1,5 @@
 import optuna
-from typing import Literal, Dict, Any, Optional
+from typing import Literal, Dict, Any, Optional, Union
 
 import torch
 import random
@@ -15,11 +15,12 @@ from collections import namedtuple
 from replay import ReplayBuffer
 from models import Critic, Actor
 import wandb
+from wandb.wandb_run import Run
 
 from utils import TrialEvaluationCallback
 
 
-DDPG_DEFAULT_PARAMS = {
+TD3_DEFAULT_PARAMS = {
     'env_id': "Pendulum-v1",
     'seed': 258,
     'replay_size': int(4e5),
@@ -29,13 +30,16 @@ DDPG_DEFAULT_PARAMS = {
     'update_batch_size': 256,
     'update_frequency': 10,
     'update_iterations': 1,
+    'policy_delay': 1,
     'gamma': 0.9,
-    'n_step': 3,
+    'n_step': 1,
     'critic_lr':1e-4,
     'actor_lr': 1e-3,
     'critic_loss': 'hubber',
     'num_training_episodes': int(20e3),
-    'exploration_noise_scale': 0.1,
+    'action_noise_scale': 0.1,
+    'target_noise_scale': 0.2,
+    'target_noise_clip': 0.5,
     'warm_up_iters': 5000,
     'max_gradient_norm': 0.5,
     'num_test_episodes': 10,
@@ -44,7 +48,7 @@ DDPG_DEFAULT_PARAMS = {
     'enable_wandb_logging': True
 }
 
-def sample_ddpg_params(op_trial: optuna.Trial) -> Dict[str, Any]:
+def sample_td3_params(op_trial: optuna.Trial) -> Dict[str, Any]:
 
     """Sampler for DDPG hyperparameters."""
     replay_size = op_trial.suggest_int("replay_size", int(10e3), int(10e5))
@@ -79,7 +83,7 @@ def sample_ddpg_params(op_trial: optuna.Trial) -> Dict[str, Any]:
         'max_gradient_norm': max_gradient_norm
     }
 
-class DDPG:
+class TD3:
 
     def __init__(self,
                  env_id: str,
@@ -94,10 +98,13 @@ class DDPG:
                  n_step: int,
                  update_frequency: int,
                  update_iterations: int,
+                 policy_delay: int,
                  critic_lr: float,
                  actor_lr: float,
                  max_gradient_norm: float,
-                 exploration_noise_scale: float,
+                 action_noise_scale: float,
+                 target_noise_scale: float,
+                 target_noise_clip: float,
                  num_training_episodes: int,
                  warm_up_iters: int,
                  num_test_episodes: int,
@@ -117,11 +124,14 @@ class DDPG:
         self.__hparam_gamma = gamma
         self.__hparam_update_frequency = update_frequency
         self.__hparam_update_iterations = update_iterations
+        self.__hparam_policy_delay = policy_delay
         self.__hparam_n_step = n_step
         self.__hparam_critic_lr = critic_lr
         self.__hparam_actor_lr = actor_lr
         self.__hparam_max_gradient_norm = max_gradient_norm
-        self.__hparam_exploration_noise_scale = exploration_noise_scale
+        self.__hparam_action_noise_scale  = action_noise_scale
+        self.__hparam_target_noise_scale = target_noise_scale
+        self.__hparam_target_noise_clip = target_noise_clip
         self.__hparam_n_training_episodes = num_training_episodes
         self.__hparam_warm_up_iters = warm_up_iters
         self.__hparam_critic_loss_fn = critic_loss
@@ -153,20 +163,33 @@ class DDPG:
         self.__exp_replay = ReplayBuffer(maxsize=replay_size)
 
         # Critic Networks
-
-        self.__critic = Critic(observation_dims=observation_dims,
-                                action_dims=action_dims,
-                                hidden_size=actor_critic_hidden_size,
-                                activation=activation).to(self.device)
+        self.__critic_first = Critic(observation_dims=observation_dims,
+                                      action_dims=action_dims,
+                                      hidden_size=actor_critic_hidden_size,
+                                      activation=activation).to(self.device)
         
-        self.__critic_tar = Critic(observation_dims=observation_dims,
-                                    action_dims=action_dims,
-                                    hidden_size=actor_critic_hidden_size,
-                                    activation=activation).to(self.device)
-
-        self.__critic_optimizer = optim.Adam(self.critic.parameters(),
-                                             lr=critic_lr)
+        self.__critic_first_target = Critic(observation_dims=observation_dims,
+                                             action_dims=action_dims,
+                                             hidden_size=actor_critic_hidden_size,
+                                             activation=activation).to(self.device)
         
+        self.__critic_second = Critic(observation_dims=observation_dims,
+                                       action_dims=action_dims,
+                                       hidden_size=actor_critic_hidden_size,
+                                       activation=activation).to(self.device)
+        
+        self.__critic_second_target = Critic(observation_dims=observation_dims,
+                                             action_dims=action_dims,
+                                             hidden_size=actor_critic_hidden_size,
+                                             activation=activation).to(self.device)
+        
+
+        self.__critic_optimizer_first = optim.Adam(self.critic_first.parameters(),
+                                                   lr=critic_lr)
+
+        self.__critic_optimizer_second = optim.Adam(self.critic_second.parameters(),
+                                                    lr=critic_lr)
+
         # Actor Networks
         self.__actor = Actor(observation_dims=observation_dims,
                               action_dims=action_dims,
@@ -182,8 +205,9 @@ class DDPG:
                                             lr=actor_lr)
 
         # Copy weights
-        self.critic.load_state_dict(self.__critic_tar.state_dict())
-        self.actor.load_state_dict(self.__actor_tar.state_dict())
+        self.critic_first.load_state_dict(self.critic_first_target.state_dict())
+        self.critic_second.load_state_dict(self.critic_second_target.state_dict())
+        self.actor.load_state_dict(self.actor_target.state_dict())
 
 
     @property
@@ -191,16 +215,28 @@ class DDPG:
         return self.__env
 
     @property
-    def critic(self):
-        return self.__critic
+    def critic_first(self):
+        return self.__critic_first
     
     @property
-    def critic_target(self):
-        return self.__critic_tar
+    def critic_first_target(self):
+        return self.__critic_first_target
     
     @property
-    def critic_optimizer(self):
-        return self.__critic_optimizer
+    def critic_second(self):
+        return self.__critic_second
+    
+    @property
+    def critic_second_target(self):
+        return self.__critic_second_target
+    
+    @property
+    def critic_optimizer_first(self):
+        return self.__critic_optimizer_first
+    
+    @property
+    def critic_optimizer_second(self):
+        return self.__critic_optimizer_second
 
     @property
     def actor_optimizer(self):
@@ -245,15 +281,25 @@ class DDPG:
         return actions
             
     
-    def critic_soft_update(self,
+    def first_critic_soft_update(self,
                            polyak:float):
-        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+        for param, target_param in zip(self.critic_first.parameters(), self.critic_first_target.parameters()):
             target_param.data.copy_( polyak * target_param.data + (1 - polyak) * param.data )
     
-    def critic_hard_update(self,
+    def first_critic_hard_update(self,
                            polyak:float):
-        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-            target_param.data.copy_(param.data)  
+        for param, target_param in zip(self.critic_first.parameters(), self.critic_first_target.parameters()):
+            target_param.data.copy_(param.data)
+
+    def second_critic_soft_update(self,
+                           polyak:float):
+        for param, target_param in zip(self.critic_second.parameters(), self.critic_second_target.parameters()):
+            target_param.data.copy_( polyak * target_param.data + (1 - polyak) * param.data )
+    
+    def second_critic_hard_update(self,
+                           polyak:float):
+        for param, target_param in zip(self.critic_second.parameters(), self.critic_second_target.parameters()):
+            target_param.data.copy_(param.data)
         
     def actor_soft_update(self,
                           polyak: float):
@@ -275,77 +321,164 @@ class DDPG:
         return normalized_obs
         
     def train_step(self, 
-                   batch_size: int):
+                   batch_size: int,
+                   writer: Union[Run, None]):
         
-        # Sample a batch of transitions from the replay
-        num_samples, samples = self.__exp_replay.sample(batch_size)
+        assert self.__hparam_policy_delay <= self.__hparam_update_iterations
+
+        critic_first_losses = []
+        critic_second_losses = []
+        actor_losses = []
+        returns_first_errs_hist = []
+        returns_second_errs_hist = []
+        returns_hist = []
         
-        if num_samples > 0:
-            states = []
-            actions = []
-            rewards = []
-            next_states = []
-            dones = []
-            returns = []
-            for sample in samples:
-                states.append(sample.state)
-                actions.append(sample.action)
-                rewards.append(sample.n_step_reward)
-                next_states.append(sample.n_step_next_state)
-                dones.append(sample.terminated)
-                returns.append(sample.returns)
+        for _iter_ in range(self.__hparam_update_iterations):
 
-            states = torch.Tensor(np.array(states)).to(self.device)
-            actions = torch.Tensor(np.array(actions)).to(self.device)
-            rewards = torch.Tensor(np.array(rewards)).to(self.device)
-            next_states = torch.Tensor(np.array(next_states)).to(self.device)
-            dones = torch.Tensor(1 - np.array(dones)).to(self.device)
-            returns = torch.Tensor(np.array(returns)).to(self.device)
-
-            # ------------------ Update Critic Network -------------------- #
-
-            # Calculate target 
-            Q_s = None
+            # Sample a batch of transitions from the replay
+            num_samples, samples = self.__exp_replay.sample(batch_size)
             
-            self.critic_target.eval()
-            self.actor_target.eval()
-            with torch.no_grad():
-                Q_s = self.critic_target(next_states, self.actor_target(next_states))
-            self.critic_target.train()
-            self.actor_target.train()
+            if num_samples > 0:
+                states = []
+                actions = []
+                rewards = []
+                next_states = []
+                dones = []
+                returns = []
+                for sample in samples:
+                    states.append(sample.state)
+                    actions.append(sample.action)
+                    rewards.append(sample.n_step_reward)
+                    next_states.append(sample.n_step_next_state)
+                    dones.append(sample.terminated)
+                    returns.append(sample.returns)
 
-            target = rewards + (self.__hparam_gamma**self.__hparam_n_step) * dones * Q_s.squeeze(dim=1)
-            Q = self.critic(states, actions).squeeze(dim=1)
-            
-            if self.__hparam_critic_loss_fn == 'mse':
-                critic_loss = F.mse_loss(Q, target)
-            else:
-                critic_loss = F.huber_loss(Q, target, delta=1.0)
+                states = torch.Tensor(np.array(states)).to(self.device)
+                actions = torch.Tensor(np.array(actions)).to(self.device)
+                rewards = torch.Tensor(np.array(rewards)).to(self.device)
+                next_states = torch.Tensor(np.array(next_states)).to(self.device)
+                dones = torch.Tensor(1 - np.array(dones)).to(self.device)
+                returns = torch.Tensor(np.array(returns)).to(self.device)
 
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            # Clip the gradients
-            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.__hparam_max_gradient_norm)
-            # Update gradients
-            self.critic_optimizer.step()
+                # ------------------ Update Critic Network -------------------- #
 
-            # ------------------ Update Actor Network -------------------- #
-            actor_loss = -self.critic(states, self.actor(states)).mean()
-            self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            # Clip the gradients
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.__hparam_max_gradient_norm)
-            # Update gradients
-            self.actor_optimizer.step()
+                # Calculate target 
+                Q_s = None
+                target_actions = None
 
-            # Update target network weight
-            self.critic_soft_update(polyak=self.__hparam_polyak)
-            self.actor_soft_update(polyak=self.__hparam_polyak)
-            
-            returns_err = None
-            with torch.no_grad():
-                returns_err = (returns - Q).abs().mean()
-            return critic_loss.item(), actor_loss.item(), returns_err.item(), returns.mean().item()
+                self.actor_target.eval()
+                with torch.no_grad():
+                    target_actions = self.actor_target(next_states)
+                    noise_vector = torch.normal(mean=0.0,
+                                                std=self.__hparam_target_noise_scale,
+                                                size=target_actions.size()).clip(min=-self.__hparam_target_noise_clip,
+                                                                                 max=self.__hparam_target_noise_clip)
+                    target_actions = target_actions + noise_vector
+                    target_actions = target_actions.clip(min=torch.Tensor(self.env.action_space.low),
+                                                         max=torch.Tensor(self.env.action_space.high))
+                self.actor_target.train()
+
+                # Calculate Q_s using first critic
+                self.critic_first_target.eval()
+                with torch.no_grad():
+                    Q_s_first = self.critic_first_target(next_states, target_actions)
+                self.critic_first_target.train()
+                
+                # Calculate Q_s using second critic
+                self.critic_second_target.eval()
+                with torch.no_grad():
+                    Q_s_second = self.critic_second_target(next_states, target_actions)
+                self.critic_second_target.train()
+                
+                Q_s = torch.minimum(Q_s_first, Q_s_second)
+                target = rewards + (self.__hparam_gamma**self.__hparam_n_step) * dones * Q_s.squeeze(dim=1)
+                
+                # ------------------ Update First Critic Network -------------------- #
+                Q_first = self.critic_first(states, actions).squeeze(dim=1)
+
+                if self.__hparam_critic_loss_fn == 'mse':
+                    critic_loss_first = F.mse_loss(Q_first, target)
+                else:
+                    critic_loss_first = F.huber_loss(Q_first, target, delta=1.0)
+
+                self.critic_optimizer_first.zero_grad()
+                critic_loss_first.backward()
+                # Clip the gradients
+                torch.nn.utils.clip_grad_norm_(self.critic_first.parameters(), self.__hparam_max_gradient_norm)
+                # Update gradients
+                self.critic_optimizer_first.step()
+
+                # ------------------ Update Second Critic Network -------------------- #
+                Q_second = self.critic_second(states, actions).squeeze(dim=1)
+
+                if self.__hparam_critic_loss_fn == 'mse':
+                    critic_loss_second = F.mse_loss(Q_second, target)
+                else:
+                    critic_loss_second = F.huber_loss(Q_second, target, delta=1.0)
+
+                self.critic_optimizer_second.zero_grad()
+                critic_loss_second.backward()
+                # Clip the gradients
+                torch.nn.utils.clip_grad_norm_(self.critic_second.parameters(), self.__hparam_max_gradient_norm)
+                # Update gradients
+                self.critic_optimizer_second.step()
+
+                if self.__enable_wandb_logging:
+                    # Log losses
+                    critic_first_losses.append(critic_loss_first.item())
+                    critic_second_losses.append(critic_loss_second.item())
+
+                    # Log Estimation errs and returns
+                    returns_err_first = None
+                    returns_err_second = None
+
+                    with torch.no_grad():
+                        returns_err_first = (returns - Q_first).abs().mean()
+                        returns_err_second = (returns - Q_second).abs().mean()
+
+                    returns_first_errs_hist.append(returns_err_first)
+                    returns_second_errs_hist.append(returns_err_second)
+
+                    returns_hist.append(returns.mean().item())
+
+                # ------------------ Update Actor Network -------------------- #
+                if (_iter_ + 1) % self.__hparam_policy_delay == 0 \
+                    or self.__hparam_update_iterations == 1 :
+
+                    actor_loss = -self.critic_first(states, self.actor(states)).mean()
+                    self.actor_optimizer.zero_grad()
+                    actor_loss.backward()
+                    # Clip the gradients
+                    torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.__hparam_max_gradient_norm)
+                    # Update gradients
+                    self.actor_optimizer.step()
+
+                    # Update target network weight
+                    self.first_critic_soft_update(polyak=self.__hparam_polyak)
+                    self.second_critic_soft_update(polyak=self.__hparam_polyak)
+                    self.actor_soft_update(polyak=self.__hparam_polyak)
+
+                    if self.__enable_wandb_logging:
+                        actor_losses.append(actor_loss.item())
+        
+        if self.__enable_wandb_logging:
+
+            critic_first_losses = np.array(critic_first_losses)
+            critic_second_losses = np.array(critic_second_losses)
+            actor_losses = np.array(actor_losses)
+            returns_first_errs_hist = np.array(returns_first_errs_hist)
+            returns_second_errs_hist = np.array(returns_second_errs_hist)
+            returns_hist = np.array(returns_hist)
+
+            writer.log({
+                "loss/critic_first": critic_first_losses.mean(),
+                "loss/critic_second": critic_second_losses.mean(),
+                "loss/actor": actor_losses.mean(),
+                "returns/critic_first_est_err": returns_first_errs_hist.mean(),
+                "returns/critic_second_est_err": returns_second_errs_hist.mean(),
+                "returns/avg_returns": returns_hist.mean()
+            }, commit=False)
+
     
     def evaluate(self):
 
@@ -447,13 +580,13 @@ class DDPG:
         if self.__enable_wandb_logging:
             # Create a writer object for logging
             todays_date = datetime.date.today()
-            logger_title = "ddpg-" + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
+            logger_title = "td3-" + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
             writer = wandb.init(project=logger_title,
                                 config=self.get_hyper_parameters())
 
         # Initialize variables
         total_steps_count = 0
-        exploration_noise_scale = self.__hparam_exploration_noise_scale
+        exploration_noise_scale = self.__hparam_action_noise_scale
         
 
         for episode in tqdm(range(0, self.__hparam_n_training_episodes)):            
@@ -490,35 +623,12 @@ class DDPG:
                 # Update actor and critic
                 if total_steps_count % self.__hparam_update_frequency == 0 \
                     and total_steps_count > self.__hparam_warm_up_iters:
-
-                    critic_losses = []
-                    actor_losses = []
-                    returns_errs = []
-                    returns_hist = []
-                    for _ in range(self.__hparam_update_iterations):
-                        critic_loss, actor_loss, returns_err, returns = self.train_step(batch_size=self.__hparam_update_batch_size)
-                        critic_losses.append(critic_loss)
-                        actor_losses.append(actor_loss)
-                        returns_errs.append(returns_err)
-                        returns_hist.append(returns)
-
-                    critic_losses = np.array(critic_losses)
-                    actor_losses = np.array(actor_losses)
-                    returns_errs = np.array(returns_errs)
-                    returns_hist = np.array(returns_hist)
-                    
                     if self.__enable_wandb_logging:
-                        writer.log({
-                            "loss/critic": critic_losses.mean(),
-                            "loss/actor": actor_losses.mean(),
-                            "returns/estimation_err": returns_errs.mean(),
-                            "returns/avg_returns": returns_hist.mean()
-                        }, commit=False)
-
-                    if not self.critic.training:
-                        print("Critic is not in training mode")
-                    if not self.actor.training:
-                        print("Actor not in training mode")
+                        self.train_step(batch_size=self.__hparam_update_batch_size,
+                                        writer=writer)
+                    else:
+                        self.train_step(batch_size=self.__hparam_update_batch_size,
+                                        writer=None)
 
                     # NOTE: DONOT use training env in evaluation.
                     # As the training env might be in different state
