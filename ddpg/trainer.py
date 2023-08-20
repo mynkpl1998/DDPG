@@ -8,6 +8,7 @@ from gymnasium import Env
 import torch.optim as optim
 import torch.nn.functional as F
 from collections import namedtuple
+import cloudpickle
 
 from typing import Literal, Dict, Any, Optional
 from replay import ReplayBuffer
@@ -30,6 +31,7 @@ DDPG_DEFAULT_DICT = {
     'update_frequency': 10,
     'update_iterations': 1,
     'gamma': 0.9,
+    'n_step': 3,
     'critic_lr':1e-4,
     'actor_lr': 1e-3,
     'critic_loss': 'hubber',
@@ -39,7 +41,8 @@ DDPG_DEFAULT_DICT = {
     'max_gradient_norm': 0.5,
     'num_test_episodes': 10,
     'evaluation_freq_episodes': 10,
-    'normalize_observations': True
+    'normalize_observations': True,
+    'enable_wandb_logging': True
 }
 
 class TrialEvluationCallback:
@@ -93,6 +96,7 @@ class DDPG:
                  activation: Literal['tanh', 'relu'],
                  update_batch_size: int,
                  gamma: float,
+                 n_step: int,
                  update_frequency: int,
                  update_iterations: int,
                  critic_lr: float,
@@ -103,7 +107,8 @@ class DDPG:
                  warm_up_iters: int,
                  num_test_episodes: int,
                  evaluation_freq_episodes: int,
-                 normalize_observations: bool):
+                 normalize_observations: bool,
+                 enable_wandb_logging: bool):
         
 
         self.__env_str = env_id
@@ -117,6 +122,7 @@ class DDPG:
         self.__hparam_gamma = gamma
         self.__hparam_update_frequency = update_frequency
         self.__hparam_update_iterations = update_iterations
+        self.__hparam_n_step = n_step
         self.__hparam_critic_lr = critic_lr
         self.__hparam_actor_lr = actor_lr
         self.__hparam_max_gradient_norm = max_gradient_norm
@@ -127,6 +133,7 @@ class DDPG:
         self.__hparam_n_test_episodes = num_test_episodes
         self.__hparam_evaluation_freq_episodes = evaluation_freq_episodes
         self.__hparam_normalize_observation = normalize_observations
+        self.__enable_wandb_logging = enable_wandb_logging
 
         observation_dims = self.env.observation_space.shape[0]
         action_dims = self.env.action_space.shape[0]
@@ -288,8 +295,8 @@ class DDPG:
             for sample in samples:
                 states.append(sample.state)
                 actions.append(sample.action)
-                rewards.append(sample.reward)
-                next_states.append(sample.next_state)
+                rewards.append(sample.n_step_reward)
+                next_states.append(sample.n_step_next_state)
                 dones.append(sample.terminated)
                 returns.append(sample.returns)
 
@@ -312,18 +319,13 @@ class DDPG:
             self.critic_target.train()
             self.actor_target.train()
 
-            target = rewards + self.__hparam_gamma * dones * Q_s.squeeze(dim=1)
+            target = rewards + (self.__hparam_gamma**self.__hparam_n_step) * dones * Q_s.squeeze(dim=1)
             Q = self.critic(states, actions).squeeze(dim=1)
             
             if self.__hparam_critic_loss_fn == 'mse':
                 critic_loss = F.mse_loss(Q, target)
             else:
                 critic_loss = F.huber_loss(Q, target, delta=1.0)
-            
-            """
-            if critic_loss.item() > 300:
-                print("Returns: ", returns.mean(), "Rewards", rewards.mean(), rewards.size(), "Q: ", Q.mean(), "Target mean:", target.mean(), "Loss: ", critic_loss.item())
-            """
 
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
@@ -388,20 +390,76 @@ class DDPG:
                 param = name.replace(self.__class__.__name__, "").replace("hparam", "").replace("__", "")
                 hparams[param] = value
         return hparams
+    
+    def __calculate_n_step_returns(self, 
+                                   episode: list[tuple],
+                                   n_step: int,
+                                   gamma: float):
+        """Calculates the n-step gamma discounted returns for each time step of
+        the epsiode.
+        This function also returns cumulative returns for each time step.
+
+        Args:
+            episode (list[tuple]): Tuple of transitions.
+        """
+        Transition = namedtuple('Transition', ['state', 
+                                               'action', 
+                                               'n_step_reward', 
+                                               'n_step_next_state', 
+                                               'terminated', 
+                                               'returns'])
+        
+
+        assert n_step > 0, "n-step must be > 1."
+        assert gamma > 0 and gamma <= 1 , "gamma must be between (0, 1]."
+
+        cum_returns = 0
+        n_step_reward = 0
+        reverse_idx = 0
+        last_element_index = len(episode) - 1
+        buffer_transitions = []
+
+        for item_idx, item in enumerate(reversed(episode)):
+            reverse_idx += 1
+            cum_returns = item[2] + gamma * cum_returns
+            n_step_reward = item[2] + gamma * n_step_reward
+
+            next_state = None
+            if reverse_idx > n_step:
+                n_step_reward -= (gamma**n_step) * episode[last_element_index][2]
+                last_element_index -= 1
+                next_state = episode[last_element_index][3]
+                done = False              
+            else:
+                next_state = episode[-1][3]
+                done = episode[-1][4]
+
+            t = Transition(state=item[0],
+                           action=item[1],
+                           n_step_reward=n_step_reward,
+                           n_step_next_state=next_state,
+                           terminated=done,
+                           returns=cum_returns)
+            buffer_transitions.append(t)
+        
+        buffer_transitions.reverse()
+        return buffer_transitions
+
 
     def learn(self,
               eval_callback: Optional[TrialEvluationCallback] = None):
         
-        # Create a writer object for logging
-        curr_timestamp = datetime.datetime.now()
-        logger_title = "ddpga-" + self.__env.unwrapped.spec.id + "-" + str(curr_timestamp).replace(":","-")
-        writer = wandb.init(project=logger_title,
-                            config=self.get_hyper_parameters())
+        if self.__enable_wandb_logging:
+            # Create a writer object for logging
+            todays_date = datetime.date.today()
+            logger_title = "ddpg-" + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
+            writer = wandb.init(project=logger_title,
+                                config=self.get_hyper_parameters())
 
         # Initialize variables
         total_steps_count = 0
         exploration_noise_scale = self.__hparam_exploration_noise_scale
-        Transition = namedtuple('Transition', ['state', 'action', 'reward', 'next_state', 'terminated', 'returns'])
+        
 
         for episode in tqdm(range(0, self.__hparam_n_training_episodes)):            
             state, info = self.env.reset()
@@ -453,12 +511,14 @@ class DDPG:
                     actor_losses = np.array(actor_losses)
                     returns_errs = np.array(returns_errs)
                     returns_hist = np.array(returns_hist)
-                    writer.log({
-                        "loss/critic": critic_losses.mean(),
-                        "loss/actor": actor_losses.mean(),
-                        "returns/estimation_err": returns_errs.mean(),
-                        "returns/avg_returns": returns_hist.mean()
-                    }, commit=False)
+                    
+                    if self.__enable_wandb_logging:
+                        writer.log({
+                            "loss/critic": critic_losses.mean(),
+                            "loss/actor": actor_losses.mean(),
+                            "returns/estimation_err": returns_errs.mean(),
+                            "returns/avg_returns": returns_hist.mean()
+                        }, commit=False)
 
                     if not self.critic.training:
                         print("Critic is not in training mode")
@@ -468,28 +528,21 @@ class DDPG:
                     # NOTE: DONOT use training env in evaluation.
                     # As the training env might be in different state
 
+            
             # Calculate Returns and store in replay buffer
-            returns = 0
-            buffer_transitions = []
-            for item_idx, item in enumerate(reversed(epsiode_transitions)):
-                returns = item[2] + self.gamma * returns
-                t = Transition(state=item[0],
-                               action=item[1],
-                               reward=item[2],
-                               next_state=item[3],
-                               terminated=item[4],
-                               returns=returns)
-                buffer_transitions.append(t)
             
-            buffer_transitions.reverse()
-            
+            buffer_transitions = self.__calculate_n_step_returns(epsiode_transitions,
+                                                                  n_step=self.__hparam_n_step,
+                                                                  gamma=self.gamma)
+
             # Add the episode to the replay buffer
             self.__exp_replay.add_epsiode(buffer_transitions)
             
-            # Log current replay size
-            writer.log({
-                "replay/size": self.__exp_replay.replay_size
-            }, commit=False)
+            if self.__enable_wandb_logging:
+                # Log current replay size
+                writer.log({
+                    "replay/size": self.__exp_replay.replay_size
+                }, commit=False)
             
             # Evaluate agent performance
             
@@ -499,18 +552,21 @@ class DDPG:
                 if eval_callback is not None:
                     eval_callback.step(self.last_mean_test_reward)
                 
-                writer.log({
-                    "reward/mean_test_reward": self.last_mean_test_reward
-                }, commit=False)
-            
-
-            # Log metrics
-            writer.log({"reward/episode_sum_reward": episode_sum_reward,
-                        "exploration/noise_scale": exploration_noise_scale}, commit=True)
+                if self.__enable_wandb_logging:
+                    writer.log({
+                        "reward/mean_test_reward": self.last_mean_test_reward
+                    }, commit=False)
+                
+            if self.__enable_wandb_logging:
+                # Log metrics
+                writer.log({"reward/episode_sum_reward": episode_sum_reward,
+                            "exploration/noise_scale": exploration_noise_scale}, commit=True)
             
             #print("Episode: {} Train Cum Reward: {:.2f} Last Mean Test Cum Reward: {:.2f} Total Steps: {}.".format(episode+1, episode_sum_reward , self.last_mean_test_reward, total_steps_count))
-        # Close writer
-        writer.finish()
+
+        if self.__enable_wandb_logging:
+            # Close writer
+            writer.finish()
                 
 
 def sample_ddpg_params(op_trial: optuna.Trial) -> Dict[str, Any]:
@@ -571,18 +627,26 @@ def objective(op_trial: optuna.Trial):
 
 if __name__ == "__main__":
     
-    N_STARTUP_TRIALS = 5
-    N_EVALUATIONS = 2
-    N_TRIALS = 30
-    TIMEOUT_MINS = 15
+    tune = False
 
-    # Set pytorch num threads to 1 for faster training.
-    torch.set_num_threads(1)
+    if tune:
 
-    # Intialize sampling and pruning algorithms 
-    sampler = TPESampler(n_startup_trials=N_STARTUP_TRIALS)
-    pruner = MedianPruner(n_startup_trials=N_STARTUP_TRIALS, n_warmup_steps=N_EVALUATIONS)
+        N_STARTUP_TRIALS = 5
+        N_EVALUATIONS = 2
+        N_TRIALS = 30
+        TIMEOUT_MINS = 15
 
-    # Create a study
-    study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize")
-    study.optimize(objective, n_trials=N_TRIALS, timeout=TIMEOUT_MINS*60)
+        # Set pytorch num threads to 1 for faster training.
+        torch.set_num_threads(1)
+
+        # Intialize sampling and pruning algorithms 
+        sampler = TPESampler(n_startup_trials=N_STARTUP_TRIALS)
+        pruner = MedianPruner(n_startup_trials=N_STARTUP_TRIALS, n_warmup_steps=N_EVALUATIONS)
+
+        # Create a study
+        study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize")
+        study.optimize(objective, n_trials=N_TRIALS, timeout=TIMEOUT_MINS*60)
+    
+    else:
+        agent = DDPG(**DDPG_DEFAULT_DICT)
+        agent.learn(eval_callback=None)
