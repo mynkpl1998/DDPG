@@ -375,8 +375,8 @@ class TD3:
                                                 size=target_actions.size()).clip(min=-self.__hparam_target_noise_clip,
                                                                                  max=self.__hparam_target_noise_clip)
                     target_actions = target_actions + noise_vector.to(self.device)
-                    target_actions = target_actions.clip(min=torch.Tensor(self.env.action_space.low),
-                                                         max=torch.Tensor(self.env.action_space.high))
+                    target_actions = target_actions.clip(min=torch.Tensor(self.env.action_space.low).to(self.device),
+                                                         max=torch.Tensor(self.env.action_space.high)to(self.device))
                 self.actor_target.train()
 
                 # Calculate Q_s using first critic
