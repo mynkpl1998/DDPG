@@ -434,8 +434,8 @@ class TD3:
                     returns_err_second = None
 
                     with torch.no_grad():
-                        returns_err_first = (returns - Q_first).abs().mean()
-                        returns_err_second = (returns - Q_second).abs().mean()
+                        returns_err_first = (returns - Q_first).abs().mean().item()
+                        returns_err_second = (returns - Q_second).abs().mean().item()
 
                     returns_first_errs_hist.append(returns_err_first)
                     returns_second_errs_hist.append(returns_err_second)
