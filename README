@@ -1,0 +1,6 @@
+## Installation 
+
+For CPU only runs
+```bash
+conda env create -f environment.yml -p /home/user/anaconda3/envs/env_name
+```

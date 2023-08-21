@@ -29,9 +29,9 @@ TD3_DEFAULT_PARAMS = {
     'actor_critic_hidden_size': 256,
     'activation': 'relu',
     'update_batch_size': 256,
-    'update_frequency': 10,
-    'update_iterations': 1,
-    'policy_delay': 1,
+    'update_frequency': int(10),
+    'update_iterations': 3,
+    'policy_delay': 2,
     'gamma': 0.9,
     'n_step': 1,
     'critic_lr':1e-4,
@@ -574,6 +574,23 @@ class TD3:
         buffer_transitions.reverse()
         return buffer_transitions
 
+    def __set_wandb_logging_metrics(self) -> None:
+        """Defines how the logging metrics are plotted.
+        """
+        
+        # define our custom x axis metrics
+        wandb.define_metric("episode")
+        wandb.define_metric("step")
+
+        # define which metrics will be plotted against it
+        wandb.define_metric("reward/*", step_metric="episode")
+        wandb.define_metric("replay/size", step_metric="episode")
+        wandb.define_metric("exploration/noise_scale", step_metric="episode")
+        
+    
+        wandb.define_metric("returns/*", step_metric="step")
+        wandb.define_metric("loss/*", step_metric="step")
+
 
     def learn(self,
               logger_title: str,
@@ -588,6 +605,7 @@ class TD3:
             writer = wandb.init(project=logger_title,
                                 config=self.get_hyper_parameters(),
                                 name=run_name)
+            self.__set_wandb_logging_metrics()
 
         # Initialize variables
         total_steps_count = 0
@@ -605,6 +623,11 @@ class TD3:
             while not done:
 
                 total_steps_count += 1
+
+                # Log the current step count
+                writer.log({
+                    "step": total_steps_count
+                }, commit=False)
 
                 # Get an action to execute
                 action = self.get_action(torch.from_numpy(state).to(self.device), 
@@ -670,7 +693,8 @@ class TD3:
             if self.__enable_wandb_logging:
                 # Log metrics
                 writer.log({"reward/episode_sum_reward": episode_sum_reward,
-                            "exploration/noise_scale": exploration_noise_scale}, commit=True)
+                            "exploration/noise_scale": exploration_noise_scale,
+                            "epsiode": episode}, commit=True)
             
             #print("Episode: {} Train Cum Reward: {:.2f} Last Mean Test Cum Reward: {:.2f} Total Steps: {}.".format(episode+1, episode_sum_reward , self.last_mean_test_reward, total_steps_count))
 

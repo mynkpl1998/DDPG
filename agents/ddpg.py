@@ -27,10 +27,10 @@ DDPG_DEFAULT_PARAMS = {
     'actor_critic_hidden_size': 256,
     'activation': 'relu',
     'update_batch_size': 256,
-    'update_frequency': 10,
-    'update_iterations': 1,
+    'update_frequency': int(100),
+    'update_iterations': 5,
     'gamma': 0.9,
-    'n_step': 3,
+    'n_step': 1,
     'critic_lr':1e-4,
     'actor_lr': 1e-3,
     'critic_loss': 'hubber',
@@ -441,17 +441,33 @@ class DDPG:
         return buffer_transitions
 
 
+    def __set_wandb_logging_metrics(self) -> None:
+        """Defines how the logging metrics are plotted.
+        """
+        
+        # define our custom x axis metrics
+        wandb.define_metric("episode")
+        wandb.define_metric("step")
+
+        # define which metrics will be plotted against it
+        wandb.define_metric("reward/*", step_metric="episode")
+        wandb.define_metric("replay/size", step_metric="episode")
+    
+        wandb.define_metric("returns/*", step_metric="step")
+        wandb.define_metric("loss/*", step_metric="step")
+    
     def learn(self,
               logger_title: str,
               eval_callback: Optional[TrialEvaluationCallback] = None):
         
         if self.__enable_wandb_logging:
             # Create a writer object for logging
-            todays_date = datetime.date.today()
-            run_name = self.__class__.__name__ + " " +self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
+            todays_date = datetime.datetime.now()
+            run_name = self.__class__.__name__ + " " + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
             writer = wandb.init(project=logger_title,
                                 config=self.get_hyper_parameters(),
                                 name=run_name)
+            self.__set_wandb_logging_metrics()
 
         # Initialize variables
         total_steps_count = 0
