@@ -269,7 +269,7 @@ class TD3:
             self.actor.eval()
             actions_torch = self.actor(states)
             self.actor.train()
-        actions = actions_torch.numpy()
+        actions = actions_torch.cpu().numpy()
         
         # Add noise
         if noise > 0.0:
