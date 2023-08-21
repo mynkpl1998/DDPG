@@ -374,7 +374,7 @@ class TD3:
                                                 std=self.__hparam_target_noise_scale,
                                                 size=target_actions.size()).clip(min=-self.__hparam_target_noise_clip,
                                                                                  max=self.__hparam_target_noise_clip)
-                    target_actions = target_actions + noise_vector
+                    target_actions = target_actions + noise_vector.to(self.device)
                     target_actions = target_actions.clip(min=torch.Tensor(self.env.action_space.low),
                                                          max=torch.Tensor(self.env.action_space.high))
                 self.actor_target.train()
