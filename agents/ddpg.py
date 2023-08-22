@@ -20,7 +20,7 @@ from utils import TrialEvaluationCallback
 
 
 DDPG_DEFAULT_PARAMS = {
-    'env_id': "Pendulum-v1",
+    'env_id': "BipedalWalker-v3",
     'seed': 258,
     'replay_size': int(4e5),
     'polyak': 0.9995,
@@ -273,9 +273,11 @@ class DDPG:
         
         if normalized_obs.max() > 1.0 \
             and np.abs(1 - normalized_obs.max()) > 0.1:
-            raise RuntimeError("Detected Normalized vector have value greater than 1.")
+            raise RuntimeError("Detected Normalized vector having value greater than one.")
 
-        assert normalized_obs.min() >= 0.0
+        if normalized_obs.min() < 0.0 \
+            and np.abs(normalized_obs.min()) > 0.1:
+            raise RuntimeError("Detected Normalized vector having value less than zero.")
         return normalized_obs
         
     def train_step(self, 
