@@ -53,6 +53,6 @@ if __name__ == "__main__":
         study.optimize(objective, n_trials=N_TRIALS, timeout=TIMEOUT_MINS*60)
     
     else:
-        agent = TD3(**TD3_DEFAULT_PARAMS)
+        agent = DDPG(**DDPG_DEFAULT_PARAMS)
         agent.learn(logger_title='rl_experiments',
                     eval_callback=None)

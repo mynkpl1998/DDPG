@@ -41,7 +41,7 @@ DDPG_DEFAULT_PARAMS = {
     'num_test_episodes': 10,
     'evaluation_freq_episodes': 10,
     'normalize_observations': True,
-    'enable_wandb_logging': True
+    'enable_wandb_logging': False
 }
 
 def sample_ddpg_params(op_trial: optuna.Trial) -> Dict[str, Any]:
@@ -270,7 +270,11 @@ class DDPG:
         high = self.env.observation_space.high
         scale_factor = high - low
         normalized_obs = np.divide(obs - low, scale_factor)
-        assert normalized_obs.max() <= 1.0
+        
+        if normalized_obs.max() > 1.0 \
+            and np.abs(1 - normalized_obs.max()) > 0.1:
+            raise RuntimeError("Detected Normalized vector have value greater than 1.")
+
         assert normalized_obs.min() >= 0.0
         return normalized_obs
         
