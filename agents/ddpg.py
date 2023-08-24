@@ -32,7 +32,7 @@ DDPG_DEFAULT_PARAMS = {
     'update_frequency': int(100),
     'update_iterations': 5,
     'gamma': 0.9,
-    'n_step': 5,
+    'n_step': 10,
     'critic_lr':1e-4,
     'actor_lr': 1e-3,
     'critic_loss': 'hubber',
@@ -142,6 +142,10 @@ class DDPG(BaseAgent):
                 if param not in self.writer.config.keys():
                     self.writer.config[param] = hyper_params[param]
         
+        # Register metrics to log in wandb
+        if self.is_wandb_logging_enabled:
+            self.set_wandb_logging_metrics()
+
         # Experience Replay
         self.__exp_replay = ReplayBuffer(maxsize=replay_size)
 
@@ -224,15 +228,13 @@ class DDPG(BaseAgent):
     
     def set_wandb_logging_metrics(self) -> None:
         
-        print("Yes")
-        super().__set_wandb_logging_metrics()
-
+        super().set_wandb_logging_metrics()
         # define which metrics will be plotted against it
-        wandb.define_metric("replay/size", step_metric="step")
+        wandb.define_metric("replay/size", step_metric="episode")
         wandb.define_metric("loss/actor", step_metric="step")
         wandb.define_metric("loss/critic", step_metric="step")
         wandb.define_metric("returns/avg_err_in_estimate", step_metric="step")
-        wandb.define_metric("replay/avg_err", step_metric="step")
+        wandb.define_metric("returns/avg_returns", step_metric="step")
 
     def learn_episode_callback(self, episode: int, cum_reward: float, episode_length: int, n_step_transition_tuple: list) -> None:
         
@@ -353,8 +355,8 @@ class DDPG(BaseAgent):
                     "loss/critic": critic_loss,
                     "loss/actor": actor_loss,
                     "returns/avg_err_in_estimate": err_in_est,
-                    "replay/avg_err": avg_returns
-                })
+                    "returns/avg_returns": avg_returns
+                }, commit=False)
 
     def get_action(self,
                    state: np.array,

@@ -149,7 +149,6 @@ class BaseAgent:
     def set_wandb_logging_metrics(self) -> None:
         """Defines how the logging metrics are plotted.
         """
-        
         # define our custom x axis metrics
         wandb.define_metric("episode")
         wandb.define_metric("step")
@@ -348,4 +347,4 @@ class BaseAgent:
             if self.is_wandb_logging_enabled:
                 self.writer.log({"reward/train": episode_sum_reward,
                                  "episode_length/train": episode_length,
-                                 "epsiode": episode}, commit=True)
+                                 "epsiode": episode+1}, commit=True)
