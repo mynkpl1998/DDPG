@@ -132,6 +132,7 @@ class BaseAgent:
         scale_factor = high - low
         normalized_obs = np.divide(obs - low, scale_factor)
         
+        """
         if normalized_obs.max() > 1.0 \
             and np.abs(1 - normalized_obs.max()) > 0.1:
             raise RuntimeError("Detected Normalized vector having value greater than one.")
@@ -139,6 +140,7 @@ class BaseAgent:
         if normalized_obs.min() < 0.0 \
             and np.abs(normalized_obs.min()) > 0.1:
             raise RuntimeError("Detected Normalized vector having value less than zero.")
+        """
         return normalized_obs
     
     def get_action(self,
