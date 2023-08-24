@@ -5,6 +5,7 @@ from optuna.pruners import MedianPruner
 
 from agents.ddpg import DDPG, DDPG_DEFAULT_PARAMS, sample_ddpg_params
 from agents.td3 import TD3, TD3_DEFAULT_PARAMS
+from agents.base import BASE_AGENT_DEFAULT_PARAMS
 
 from utils import TrialEvaluationCallback
 
@@ -54,5 +55,4 @@ if __name__ == "__main__":
     
     else:
         agent = DDPG(**DDPG_DEFAULT_PARAMS)
-        agent.learn(logger_title='rl_experiments',
-                    eval_callback=None)
+        agent.learn()
