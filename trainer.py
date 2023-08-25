@@ -1,11 +1,14 @@
 import torch
 import optuna
+import argparse
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
 
 from agents.ddpg import DDPG, DDPG_DEFAULT_PARAMS, sample_ddpg_params
 from agents.td3 import TD3, TD3_DEFAULT_PARAMS
 from agents.base import BASE_AGENT_DEFAULT_PARAMS
+
+from hyperparams.params import PARAMS
 
 from utils import TrialEvaluationCallback
 
@@ -33,6 +36,11 @@ def objective(op_trial: optuna.Trial):
 
 if __name__ == "__main__":
     
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env-id", type=str, required=True, help="Environment ID")
+    parser.add_argument("--algo", type=str, required=True, choices=["DDPG", "TD3"], help="Algorithm to use for training.")
+    args = parser.parse_args()
+
     tune = False
 
     if tune:
@@ -54,5 +62,12 @@ if __name__ == "__main__":
         study.optimize(objective, n_trials=N_TRIALS, timeout=TIMEOUT_MINS*60)
     
     else:
-        agent = DDPG(**DDPG_DEFAULT_PARAMS)
+
+        if args.env_id in PARAMS and args.algo in PARAMS[args.env_id].keys():
+            PARAM_DICT = PARAMS[args.env_id][args.algo]
+        else:
+            print("Existing Hyperparams for {} for {} not found. Using default values.".format(args.env_id,
+                                                                                               args.algo))
+            PARAM_DICT = DDPG_DEFAULT_PARAMS
+        agent = DDPG(**PARAM_DICT)
         agent.learn()

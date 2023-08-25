@@ -29,7 +29,7 @@ DDPG_DEFAULT_PARAMS = {
     'actor_critic_hidden_size': 256,
     'activation': 'relu',
     'update_batch_size': 256,
-    'update_frequency': int(1000),
+    'update_frequency': int(2000),
     'update_iterations': 5,
     'gamma': 0.95,
     'n_step': 10,
