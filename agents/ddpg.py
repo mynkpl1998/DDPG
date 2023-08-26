@@ -252,8 +252,8 @@ class DDPG(BaseAgent):
 
         critic_losses = []
         actor_losses = []
-        returns_errs = []
-        returns_hist = []
+        returns_estimated = []
+        returns_true = []
 
         for _ in range(0, self.__hparam_update_iterations):
 
@@ -323,22 +323,21 @@ class DDPG(BaseAgent):
                 self.critic_soft_update(polyak=self.__hparam_polyak)
                 self.actor_soft_update(polyak=self.__hparam_polyak)
 
-                returns_err = None
                 with torch.no_grad():
-                    returns_err = (returns - Q).abs().mean()
+                    returns_est_mean = Q.mean()
                 
                 
                 critic_losses.append(critic_loss.item())
                 actor_losses.append(actor_loss.item())
-                returns_errs.append(returns_err.item())
-                returns_hist.append(returns.mean().item())
+                returns_estimated.append(returns_est_mean.item())
+                returns_true.append(returns.mean().item())
         
         critic_losses = np.array(critic_losses)
         actor_losses = np.array(actor_losses)
-        returns_errs = np.array(returns_errs)
-        returns_hist = np.array(returns_hist)
+        returns_estimated = np.array(returns_estimated)
+        returns_true = np.array(returns_true)
         
-        return critic_loss.mean(), actor_losses.mean(), returns_errs.mean(), returns_hist.mean() 
+        return critic_loss.mean(), actor_losses.mean(), returns_estimated.mean(), returns_true.mean() 
 
 
     def learn_step_callback(self, 
@@ -348,14 +347,14 @@ class DDPG(BaseAgent):
         """
         if step % self.__hparam_update_frequency == 0 \
             and step > self.__hparam_warm_up_iters:
-            critic_loss, actor_loss, err_in_est, avg_returns = self.__train_step(batch_size=self.__hparam_update_batch_size)
+            critic_loss, actor_loss, returns_est, returns_true = self.__train_step(batch_size=self.__hparam_update_batch_size)
 
             if self.is_wandb_logging_enabled:
                 self.writer.log({
                     "loss/critic": critic_loss,
                     "loss/actor": actor_loss,
-                    "returns/avg_err_in_estimate": err_in_est,
-                    "returns/avg_returns": avg_returns
+                    "returns/estimated": returns_est,
+                    "returns/true_returns": returns_true
                 }, commit=False)
 
     def get_action(self,
