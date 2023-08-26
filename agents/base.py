@@ -1,3 +1,4 @@
+import os
 import torch
 import random
 import datetime
@@ -44,12 +45,14 @@ class BaseAgent:
         self.__hparam_seed = seed
         self.__hparam_gamma = gamma
         self.__hparam_n_step = n_step
-        self.__hparam_normalize_observation = normalize_observations
-        self.__hparam_n_test_episodes = num_test_episodes
+        self.__hparam_normalize_observations = normalize_observations
+        self.__hparam_num_test_episodes = num_test_episodes
         self.__enable_wandb_logging = enable_wandb_logging
-        self.__hparam_n_training_episodes = num_training_episodes
+        self.__hparam_num_training_episodes = num_training_episodes
         self.__hparam_evaluation_freq_episodes = evaluation_freq_episodes
         self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.__max_mean_test_reward = -float("inf")
 
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
@@ -115,6 +118,10 @@ class BaseAgent:
     @property
     def is_wandb_logging_enabled(self,) -> bool:
         return self.__enable_wandb_logging
+
+    @property
+    def max_mean_test_reward(self) -> float:
+        return self.__max_mean_test_reward
     
     def get_hyper_parameters(self):
         hparams = {}
@@ -176,17 +183,22 @@ class BaseAgent:
         """
         pass
 
-    def learn_evaluate_callback(self) -> (float, float):
+    def learn_evaluate_callback(self,
+                                num_episodes: int,
+                                render: bool = False) -> (float, float):
         """Evaluation callback. Called at every evaluation step.
         """
         eval_episode_reward = []
         eval_episode_length = []
-        test_env = gym.make(self.__env_str)
+        if render:
+            test_env = gym.make(self.__env_str, render_mode="human")
+        else:
+            test_env = gym.make(self.__env_str)
         
-        for _ in range(self.__hparam_n_test_episodes):
+        for _ in range(num_episodes):
             
             state, info = test_env.reset()
-            if self.__hparam_normalize_observation:
+            if self.__hparam_normalize_observations:
                 state = self.normalize_observation(state)
 
             done = False
@@ -195,6 +207,9 @@ class BaseAgent:
 
             while not done:
 
+                if render:
+                    test_env.render()
+                
                 ep_length += 1
 
                 # Get an action to execute
@@ -203,7 +218,7 @@ class BaseAgent:
                 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = test_env.step(action[0])
-                if self.__hparam_normalize_observation:
+                if self.__hparam_normalize_observations:
                     next_state = self.normalize_observation(next_state)
                 cum_reward += reward
 
@@ -211,6 +226,12 @@ class BaseAgent:
                     eval_episode_reward.append(cum_reward)
                     eval_episode_length.append(ep_length)
                     done = True
+
+                    if render:
+                        print("Episode: {}, Cum Reward {}, Episode Length: {}".format(_ + 1,
+                                                                                      cum_reward,
+                                                                                      ep_length))
+
                 state = next_state
         
         eval_episode_reward = np.array(eval_episode_reward)
@@ -273,16 +294,15 @@ class BaseAgent:
         buffer_transitions.reverse()
         return buffer_transitions
 
-
     def learn(self):
         
         # Initialize variables
         total_steps_count = 0
 
-        for episode in tqdm(range(0, self.__hparam_n_training_episodes)):
+        for episode in tqdm(range(0, self.__hparam_num_training_episodes)):
             
             state, info = self.env.reset()
-            if self.__hparam_normalize_observation:
+            if self.__hparam_normalize_observations:
                 state = self.normalize_observation(state)
             
             episode_sum_reward = 0
@@ -309,7 +329,7 @@ class BaseAgent:
                 next_state, reward, terminated, truncated, info = self.env.step(action[0])
                 episode_sum_reward += reward
 
-                if self.__hparam_normalize_observation:
+                if self.__hparam_normalize_observations:
                     next_state = self.normalize_observation(next_state)
 
                 # Transition tuple
@@ -338,15 +358,64 @@ class BaseAgent:
             
             # Evaluate agent performance
             if (episode + 1) % self.__hparam_evaluation_freq_episodes == 0:
-                eval_mean_reward, eval_mean_ep_length = self.learn_evaluate_callback()
+                eval_mean_reward, eval_mean_ep_length = self.learn_evaluate_callback(self.__hparam_num_test_episodes)
                 
                 if self.is_wandb_logging_enabled:
                     self.writer.log({
                         "reward/eval": eval_mean_reward,
                         "episode_length/eval": eval_mean_ep_length
                     }, commit=False)
+                
+                # Save the model checkpoint
+                if eval_mean_reward > self.max_mean_test_reward:
+                    
+                    self.__max_mean_test_reward = eval_mean_reward
+                    if self.is_wandb_logging_enabled:
+                        prefix = "checkpoints/{}/{}/".format(self.__class__.__name__, wandb.run._run_id)
+                    else:
+                        prefix = "checkpoints/{}/".format(self.__class__.__name__)
+                    
+                    if not os.path.exists(prefix):
+                        os.makedirs(prefix)
+                    
+                    check_point_name = self.env_id + "_" + self.__class__.__name__ + "_{}_episode_".format(episode+1) + "{:.2f}_mean_reward_checkpoint.pkt".format(eval_mean_reward)
+                    self.save_checkpoint(prefix + check_point_name)
+                    
+                    if self.is_wandb_logging_enabled:
+                        self.log_artifact(name=check_point_name,
+                                          filepath=prefix + check_point_name,
+                                          type="model",
+                                          metadata={"mean_test_reward": eval_mean_reward})
 
             if self.is_wandb_logging_enabled:
                 self.writer.log({"reward/train": episode_sum_reward,
                                  "episode_length/train": episode_length,
                                  "epsiode": episode+1}, commit=True)
+    
+    def log_artifact(self,
+                     name: str,
+                     filepath: str, 
+                     type: str,
+                     metadata: dict):
+        
+        artifact = wandb.Artifact(name=name, 
+                                  type=type, 
+                                  metadata=metadata)
+        artifact.add_file(local_path=filepath)
+        wandb.run.log_artifact(artifact)
+
+    def load_checkpoint(self, path: str):
+        """Method to load the state of the trainer.
+
+        Args:
+            path (str): Path of the checkpoint to load.
+        """
+        raise NotImplementedError()
+
+    def save_checkpoint(self, path: str):
+        """Method to save the state of the trainer.
+
+        Args:
+            path (str): Path to save the checkpoint.
+        """
+        raise NotImplementedError()

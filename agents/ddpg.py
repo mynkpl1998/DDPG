@@ -35,7 +35,7 @@ DDPG_DEFAULT_PARAMS = {
     'n_step': 10,
     'critic_lr':1e-4,
     'actor_lr': 1e-4,
-    'critic_loss': 'hubber',
+    'critic_loss_fn': 'hubber',
     'num_training_episodes': int(50000),
     'exploration_noise_scale': 0.2,
     'warm_up_iters': 10000,
@@ -90,7 +90,7 @@ class DDPG(BaseAgent):
                  replay_size: int,
                  polyak: float,
                  actor_critic_hidden_size: int,
-                 critic_loss: Literal['mse', 'hubber'],
+                 critic_loss_fn: Literal['mse', 'hubber'],
                  activation: Literal['tanh', 'relu'],
                  update_batch_size: int,
                  gamma: float,
@@ -132,7 +132,7 @@ class DDPG(BaseAgent):
         self.__hparam_max_gradient_norm = max_gradient_norm
         self.__hparam_exploration_noise_scale = exploration_noise_scale
         self.__hparam_warm_up_iters = warm_up_iters
-        self.__hparam_critic_loss_fn = critic_loss
+        self.__hparam_critic_loss_fn = critic_loss_fn
         
 
         # Update the hyper-parameters in wandb config dict
@@ -383,3 +383,22 @@ class DDPG(BaseAgent):
                           a_max=self.env.action_space.high)
         return actions
     
+    def load_checkpoint(self, path: str):
+        state = torch.load(path)
+        self.critic.load_state_dict(state["critic"])
+        self.critic_optimizer.load_state_dict(state["critic_optimizer"])
+        self.actor.load_state_dict(state["actor"])
+        self.actor_optimizer.load_state_dict(state["actor_optimizer"])
+        hyper_params = state["hyper_params"]
+        print("Loaded checkpoint: {}".format(path))
+
+    def save_checkpoint(self, path: str):
+        torch.save({
+            "critic": self.critic.state_dict(),
+            "actor": self.actor.state_dict(),
+            "critic_optimizer": self.critic_optimizer.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "hyper_params": self.get_hyper_parameters(),
+            "algo": "DDPG",
+            "env_id": self.env_id
+        }, path)

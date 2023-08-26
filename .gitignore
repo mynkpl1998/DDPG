@@ -17,6 +17,10 @@ events.out.tfevents.*
 # Wandb files
 wandb/*
 
+# Checkpoint files
+checkpoints/*
+*.pkt
+
 # Distribution / packaging
 .Python
 build/
