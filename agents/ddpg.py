@@ -384,7 +384,10 @@ class DDPG(BaseAgent):
         return actions
     
     def load_checkpoint(self, path: str):
-        state = torch.load(path)
+        
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.__device = device
+        state = torch.load(path, map_location=self.device)
         self.critic.load_state_dict(state["critic"])
         self.critic_optimizer.load_state_dict(state["critic_optimizer"])
         self.actor.load_state_dict(state["actor"])

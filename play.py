@@ -8,7 +8,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, required=True, help="Checkpoint to load.")
     args = parser.parse_args()
 
-    state = torch.load(args.checkpoint)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    state = torch.load(args.checkpoint, map_location=device)
     algo = state["algo"]
     hyperparams = state['hyper_params']
     if algo == "DDPG":
