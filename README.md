@@ -12,7 +12,7 @@ tar -xvf mujoco-2.3.7-linux-x86_64.tar.gz
 ### Edit the .bashrc with the following path
 ```
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.mujoco/mujoco210/mujoco-2.3.7/bin/
-souce ~/.bashrc
+source ~/.bashrc
 ```
 
 ## Insatlling Python and required dependencies
