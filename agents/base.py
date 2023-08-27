@@ -19,6 +19,7 @@ BASE_AGENT_DEFAULT_PARAMS = {
     'n_step': 1,
     'num_training_episodes': int(20e3),
     'num_test_episodes': 10,
+    'warm_up_iters': 10000,
     'evaluation_freq_episodes': 10,
     'normalize_observations': True,
     'enable_wandb_logging': False,
@@ -34,6 +35,7 @@ class BaseAgent:
                  n_step: int,
                  num_training_episodes: int,
                  num_test_episodes: int,
+                 warm_up_iters: int,
                  evaluation_freq_episodes: int,
                  normalize_observations: bool,
                  enable_wandb_logging: bool,
@@ -50,6 +52,7 @@ class BaseAgent:
         self.__enable_wandb_logging = enable_wandb_logging
         self.__hparam_num_training_episodes = num_training_episodes
         self.__hparam_evaluation_freq_episodes = evaluation_freq_episodes
+        self.__hparam_warm_up_iters = warm_up_iters
         self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.__max_mean_test_reward = -float("inf")
@@ -123,6 +126,10 @@ class BaseAgent:
     def max_mean_test_reward(self) -> float:
         return self.__max_mean_test_reward
     
+    @property
+    def warm_up_iters(self):
+        return self.__hparam_warm_up_iters
+    
     def get_hyper_parameters(self):
         hparams = {}
         for name, value in self.__dict__.items():
@@ -152,7 +159,7 @@ class BaseAgent:
     
     def get_action(self,
                    state: np.array,
-                   mode: Literal['train', 'eval'] = 'train') -> np.array:
+                   mode: Literal['rando,', 'train', 'eval'] = 'train') -> np.array:
         raise NotImplementedError
     
     def set_wandb_logging_metrics(self) -> None:
@@ -324,10 +331,15 @@ class BaseAgent:
                         "step": total_steps_count
                     }, commit=False)
 
+                if total_steps_count > self.warm_up_iters:
+                    mode = "train"
+                else:
+                    mode = "random"
+                
                 # Get an action to execute
                 action = self.get_action(state,
-                                         mode='train')
-
+                                         mode=mode)
+                
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = self.env.step(action[0])
                 next_state = next_state.astype(np.float32)

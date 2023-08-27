@@ -115,6 +115,7 @@ class DDPG(BaseAgent):
                          n_step, 
                          num_training_episodes, 
                          num_test_episodes,
+                         warm_up_iters,
                          evaluation_freq_episodes,
                          normalize_observations,
                          enable_wandb_logging,
@@ -346,7 +347,7 @@ class DDPG(BaseAgent):
         """Step callback. Called at every step.
         """
         if step % self.__hparam_update_frequency == 0 \
-            and step > self.__hparam_warm_up_iters:
+            and step > self.warm_up_iters:
             critic_loss, actor_loss, returns_est, returns_true = self.__train_step(batch_size=self.__hparam_update_batch_size)
 
             if self.is_wandb_logging_enabled:
@@ -359,27 +360,32 @@ class DDPG(BaseAgent):
 
     def get_action(self,
                    state: np.array,
-                   mode: Literal['train', 'eval'] = 'train') -> np.array:
+                   mode: Literal['random', 'train', 'eval'] = 'train') -> np.array:
         
-        # Get the actions prediction from the actor network
-        actions_torch = None
-        
-        with torch.no_grad():
-            self.actor.eval()
-            actions_torch = self.actor(torch.from_numpy(state).to(self.device))
-            self.actor.train()
-        actions = actions_torch.cpu().numpy()
-        
-        # Add noise if we are in training mode only
-        if mode == 'train' \
-            and self.__hparam_exploration_noise_scale > 0.0:
-            actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
-                                         size=actions.shape)
-        
-        # Clip the actions value to the max and min allowed.
-        actions = np.clip(actions,
-                          a_min=self.env.action_space.low,
-                          a_max=self.env.action_space.high)
+        if mode != "random":
+            # Get the actions prediction from the actor network
+            actions_torch = None
+            
+            with torch.no_grad():
+                self.actor.eval()
+                actions_torch = self.actor(torch.from_numpy(state).to(self.device))
+                self.actor.train()
+            actions = actions_torch.cpu().numpy()
+            
+            # Add noise if we are in training mode only
+            if mode == 'train' \
+                and self.__hparam_exploration_noise_scale > 0.0:
+                actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
+                                            size=actions.shape)
+            
+            # Clip the actions value to the max and min allowed.
+            actions = np.clip(actions,
+                              a_min=self.env.action_space.low,
+                              a_max=self.env.action_space.high)
+
+        elif mode == 'random':
+            actions = np.array([self.env.action_space.sample()])
+
         return actions
     
     def load_checkpoint(self, path: str):
