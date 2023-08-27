@@ -85,5 +85,34 @@ PARAMS = {
             'enable_wandb_logging': True,
             'logger_title': 'test_logger'
         },
+        
+        "TD3": 
+        {   'env_id': "BipedalWalker-v3",
+            'seed': 258,
+            'replay_size': int(1e6),
+            'polyak': 0.995,
+            'actor_critic_hidden_size': 256,
+            'activation': 'relu',
+            'update_batch_size': 256,
+            'update_frequency': int(100),
+            'update_iterations': 4,
+            'policy_delay': 2,
+            'gamma': 0.95,
+            'n_step': 3,
+            'critic_lr':1e-4,
+            'actor_lr': 1e-4,
+            'critic_loss_fn': 'hubber',
+            'num_training_episodes': int(50000),
+            'exploration_noise_scale': 0.1,
+            'target_noise': 0.2,
+            'target_noise_clip': 0.5,
+            'warm_up_iters': 10000,
+            'max_gradient_norm': 0.5,
+            'num_test_episodes': 20,
+            'evaluation_freq_episodes': 20,
+            'normalize_observations': True,
+            'enable_wandb_logging': True,
+            'logger_title': 'td3_test_logger' 
+        },
     }
 }
