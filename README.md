@@ -20,7 +20,7 @@ source ~/.bashrc
 wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
 bash Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
 conda env create -f environment.yml
-conda activate rl_env
+conda activate rl_envpy2
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
