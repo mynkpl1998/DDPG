@@ -233,8 +233,8 @@ class DDPG(BaseAgent):
         wandb.define_metric("replay/size", step_metric="episode")
         wandb.define_metric("loss/actor", step_metric="step")
         wandb.define_metric("loss/critic", step_metric="step")
-        wandb.define_metric("returns/avg_err_in_estimate", step_metric="step")
-        wandb.define_metric("returns/avg_returns", step_metric="step")
+        wandb.define_metric("returns/estimated", step_metric="step")
+        wandb.define_metric("returns/true_returns", step_metric="step")
 
     def learn_episode_callback(self, episode: int, cum_reward: float, episode_length: int, n_step_transition_tuple: list) -> None:
         

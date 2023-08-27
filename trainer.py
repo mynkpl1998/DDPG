@@ -1,6 +1,7 @@
 import torch
 import optuna
 import argparse
+import importlib
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
 
@@ -65,9 +66,19 @@ if __name__ == "__main__":
 
         if args.env_id in PARAMS and args.algo in PARAMS[args.env_id].keys():
             PARAM_DICT = PARAMS[args.env_id][args.algo]
+            
         else:
             print("Existing Hyperparams for {} for {} not found. Using default values.".format(args.env_id,
                                                                                                args.algo))
-            PARAM_DICT = DDPG_DEFAULT_PARAMS
-        agent = DDPG(**PARAM_DICT)
+            if args.algo == "DDPG":
+                PARAM_DICT = DDPG_DEFAULT_PARAMS
+            elif args.algo == "TD3":    
+                PARAM_DICT = TD3_DEFAULT_PARAMS
+        
+        if args.algo == "DDPG":
+            agent = DDPG(**PARAM_DICT)
+        elif args.algo == "TD3":
+            agent = TD3(**PARAM_DICT)
+        
+        # Start learning
         agent.learn()
