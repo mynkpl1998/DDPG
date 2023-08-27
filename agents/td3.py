@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import wandb
+from typing import Optional
 
 TD3_DEFAULT_PARAMS = {
     'env_id': "BipedalWalker-v3",
@@ -64,7 +65,7 @@ class TD3(BaseAgent):
                  evaluation_freq_episodes: int, 
                  normalize_observations: bool, 
                  enable_wandb_logging: bool, 
-                 logger_title: str | None = None):
+                 logger_title: Optional[str] = None):
         
         super().__init__(env_id, 
                          seed, 
@@ -434,7 +435,18 @@ class TD3(BaseAgent):
                 }, commit=False)
 
     def load_checkpoint(self, path: str):
-        pass
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.__device = device
+        state = torch.load(path, map_location=self.device)
+        self.critic_first.load_state_dict(state["critic_first"])
+        self.critic_optimizer_first.load_state_dict(state["first_critic_optimizer"])
+        self.critic_second.load_state_dict(state["critic_second"])
+        self.critic_optimizer_second.load_state_dict(state["second_critic_optimizer"])
+        self.actor.load_state_dict(state["actor"])
+        self.actor_optimizer.load_state_dict(state["actor_optimizer"])
+        hyper_params = state["hyper_params"]
+        print("Loaded checkpoint: {}".format(path))
+
 
     def save_checkpoint(self, path: str):
         torch.save({

@@ -107,7 +107,7 @@ class DDPG(BaseAgent):
                  evaluation_freq_episodes: int,
                  normalize_observations: bool,
                  enable_wandb_logging: bool, 
-                 logger_title: str | None = None):
+                 logger_title: Optional[str] = None):
         
         super().__init__(env_id, 
                          seed, 

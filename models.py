@@ -77,7 +77,7 @@ class Actor(nn.Module):
             activation_layer,
             nn.Linear(out_features=action_dims, in_features=hidden_size)
         )
-
+    
     @property
     def observation_dims(self):
         return self.__observation_dims
@@ -101,14 +101,15 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Testing with {} device".format(device))
 
-    random_obs = torch.rand(2, obs_dims).to(device)
-    random_act = torch.rand(2, action_dims).to(device)
+    random_obs = torch.rand(200, obs_dims).to(device)
+    random_act = torch.rand(200, action_dims).to(device)
     
+
     # Test Critic
     critic = Critic(observation_dims=obs_dims,
                     action_dims=action_dims,
                     hidden_size=hidden_size,
-                    activation='tanh').to(device)
+                    activation='relu').to(device)
 
     out = critic(random_obs, random_act)
     

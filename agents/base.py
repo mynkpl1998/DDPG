@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from collections import namedtuple
 
 import wandb
-from typing import Literal, Dict, Any, Optional
+from typing import Literal, Dict, Any, Optional, NamedTuple
 
 BASE_AGENT_DEFAULT_PARAMS = {
     'env_id': "BipedalWalker-v3",
@@ -178,7 +178,7 @@ class BaseAgent:
                                 episode: int,
                                 cum_reward: float,
                                 episode_length: int,
-                                n_step_transition_tuple: list[namedtuple]) -> None:
+                                n_step_transition_tuple: list) -> None:
         """Epsiode callback. Called after every epsiode.
         """
         pass
@@ -198,6 +198,7 @@ class BaseAgent:
         for _ in range(num_episodes):
             
             state, info = test_env.reset()
+            state = state.astype(np.float32)
             if self.__hparam_normalize_observations:
                 state = self.normalize_observation(state)
 
@@ -218,6 +219,7 @@ class BaseAgent:
                 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = test_env.step(action[0])
+                next_state = next_state.astype(np.float32)
                 if self.__hparam_normalize_observations:
                     next_state = self.normalize_observation(next_state)
                 cum_reward += reward
@@ -239,7 +241,7 @@ class BaseAgent:
         return np.mean(eval_episode_reward), np.mean(eval_episode_length)
 
     def __calculate_n_step_returns(self, 
-                                   episode: list[tuple],
+                                   episode: list,
                                    n_step: int,
                                    gamma: float):
         """Calculates the n-step gamma discounted returns for each time step of
@@ -302,6 +304,7 @@ class BaseAgent:
         for episode in tqdm(range(0, self.__hparam_num_training_episodes)):
             
             state, info = self.env.reset()
+            state = state.astype(np.float32)
             if self.__hparam_normalize_observations:
                 state = self.normalize_observation(state)
             
@@ -327,6 +330,7 @@ class BaseAgent:
 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = self.env.step(action[0])
+                next_state = next_state.astype(np.float32)
                 episode_sum_reward += reward
 
                 if self.__hparam_normalize_observations:

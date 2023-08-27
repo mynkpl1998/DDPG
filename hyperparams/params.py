@@ -114,5 +114,35 @@ PARAMS = {
             'enable_wandb_logging': True,
             'logger_title': 'td3_test_logger' 
         },
+    },
+
+    "HalfCheetah-v4":
+    {
+        "DDPG":
+        {
+            'env_id': "HalfCheetah-v4",
+            'seed': 258,
+            'replay_size': int(1e6),
+            'polyak': 0.995,
+            'actor_critic_hidden_size': 256,
+            'activation': 'relu',
+            'update_batch_size': 256,
+            'update_frequency': int(1000),
+            'update_iterations': 2,
+            'gamma': 0.98,
+            'n_step': 3,
+            'critic_lr':1e-4,
+            'actor_lr': 1e-4,
+            'critic_loss_fn': 'hubber',
+            'num_training_episodes': int(10000),
+            'exploration_noise_scale': 0.2,
+            'warm_up_iters': 10000,
+            'max_gradient_norm': 1.0,
+            'num_test_episodes': 20,
+            'evaluation_freq_episodes': 100,
+            'normalize_observations': False,
+            'enable_wandb_logging': True,
+            'logger_title': 'halfcheetah_logger'
+        }
     }
 }
