@@ -24,10 +24,13 @@ class Critic(nn.Module):
         # Create a 3-layered fully connected critic network
         self.critic = nn.Sequential(
             nn.Linear(out_features=hidden_size, in_features=observation_dims + action_dims),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=hidden_size, in_features=hidden_size),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=hidden_size, in_features=hidden_size),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=1, in_features=hidden_size)
         )
@@ -70,10 +73,13 @@ class Actor(nn.Module):
         # Create a 3-layered fully connected actor network
         self.actor = nn.Sequential(
             nn.Linear(out_features=hidden_size, in_features=observation_dims),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=hidden_size, in_features=hidden_size),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=hidden_size, in_features=hidden_size),
+            nn.LayerNorm(),
             activation_layer,
             nn.Linear(out_features=action_dims, in_features=hidden_size)
         )
