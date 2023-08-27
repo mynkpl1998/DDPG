@@ -335,7 +335,7 @@ class TD3(BaseAgent):
                                             std=self.__hparam_target_noise,
                                             size=actions_next.size()).clip(min=-self.__hparam_target_noise_clip,
                                                                            max=self.__hparam_target_noise_clip)
-                
+                target_noise = target_noise.to(self.device)
                 action_space_min_torch = torch.FloatTensor(self.env.action_space.low).to(self.device)
                 action_space_max_torch = torch.FloatTensor(self.env.action_space.high).to(self.device)
                 actions_next = (actions_next + target_noise).clip(min=action_space_min_torch,
