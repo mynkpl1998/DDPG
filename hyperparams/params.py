@@ -17,16 +17,15 @@ PARAMS = {
             'actor_lr': 1e-3,
             'critic_loss_fn': 'hubber',
             'num_training_episodes': int(5000),
-            'exploration_noise_scale': 0.1,
             'warm_up_iters': 10000,
             'max_gradient_norm': 0.5,
             'num_test_episodes': 20,
             'evaluation_freq_episodes': 20,
             'normalize_observations': True,
-            'enable_wandb_logging': False,
-            'logger_title': 'test_logger',
+            'enable_wandb_logging': True,
+            'logger_title': 'noise_logger',
             'exploration_noise_type': 'NormalNoise',
-            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.1}}
         },
 
         "TD3": 
@@ -46,7 +45,6 @@ PARAMS = {
             'actor_lr': 1e-3,
             'critic_loss_fn': 'hubber',
             'num_training_episodes': int(5000),
-            'exploration_noise_scale': 0.1,
             'target_noise': 0.2,
             'target_noise_clip': 0.5,
             'warm_up_iters': 10000,
@@ -55,7 +53,9 @@ PARAMS = {
             'evaluation_freq_episodes': 20,
             'normalize_observations': True,
             'enable_wandb_logging': True,
-            'logger_title': 'td3_test_logger' 
+            'logger_title': 'noise_logger',
+            'exploration_noise_type': 'NormalNoise',
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.1}}
         },
     },
 
