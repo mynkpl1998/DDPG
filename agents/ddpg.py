@@ -37,7 +37,6 @@ DDPG_DEFAULT_PARAMS = {
     'actor_lr': 1e-4,
     'critic_loss_fn': 'hubber',
     'num_training_episodes': int(50000),
-    'exploration_noise_scale': 0.2,
     'warm_up_iters': 10000,
     'max_gradient_norm': 1.0,
     'num_test_episodes': 20,
@@ -102,7 +101,6 @@ class DDPG(BaseAgent):
                  critic_lr: float,
                  actor_lr: float,
                  max_gradient_norm: float,
-                 exploration_noise_scale: float,
                  num_training_episodes: int,
                  warm_up_iters: int,
                  num_test_episodes: int,
@@ -137,7 +135,6 @@ class DDPG(BaseAgent):
         self._hparam_critic_lr = critic_lr
         self._hparam_actor_lr = actor_lr
         self._hparam_max_gradient_norm = max_gradient_norm
-        self._hparam_exploration_noise_scale = exploration_noise_scale
         self._hparam_warm_up_iters = warm_up_iters
         self._hparam_critic_loss_fn = critic_loss_fn
         
@@ -366,6 +363,11 @@ class DDPG(BaseAgent):
     def learn_start_callback(self):
         self._action_noise.reset(self.env.action_space.shape[0])
 
+    def learn_start_episode_callback(self, 
+                                     episode):
+        if self._hparam_exploration_noise_type == "OUNoise":
+            self._action_noise.reset(self.env.action_space.shape[0])
+
     def get_action(self,
                    state: np.array,
                    mode: Literal['train', 'eval'] = 'train') -> np.array:
@@ -380,8 +382,7 @@ class DDPG(BaseAgent):
         actions = actions_torch.cpu().numpy()
         
         # Add noise if we are in training mode only
-        if mode == 'train' \
-            and self._hparam_exploration_noise_scale > 0.0:
+        if mode == 'train':
             actions += self._action_noise.sample()
         
         # Clip the actions value to the max and min allowed.

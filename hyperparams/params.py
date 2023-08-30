@@ -24,8 +24,9 @@ PARAMS = {
             'normalize_observations': True,
             'enable_wandb_logging': True,
             'logger_title': 'noise_logger',
-            'exploration_noise_type': 'NormalNoise',
-            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.1}}
+            'exploration_noise_type': 'OUNoise',
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.1},
+                                         'OUNoise': {'mu': 0.0, 'sigma': 0.2, 'theta': 0.15}}
         },
 
         "TD3": 
@@ -114,7 +115,7 @@ PARAMS = {
             'evaluation_freq_episodes': 20,
             'normalize_observations': True,
             'enable_wandb_logging': True,
-            'logger_title': 'td3_test_logger' 
+            'logger_title': 'td3_test_logger',
         },
     },
 
@@ -137,14 +138,16 @@ PARAMS = {
             'actor_lr': 1e-3,
             'critic_loss_fn': 'hubber',
             'num_training_episodes': int(10000),
-            'exploration_noise_scale': 0.3,
             'warm_up_iters': 20000,
             'max_gradient_norm': 1.0,
             'num_test_episodes': 20,
             'evaluation_freq_episodes': 100,
             'normalize_observations': False,
             'enable_wandb_logging': True,
-            'logger_title': 'halfcheetah_logger'
+            'logger_title': 'noise_logger',
+            'exploration_noise_type': 'OUNoise',
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.1},
+                                         'OUNoise': {'mu': 0.0, 'sigma': 0.2, 'theta': 0.15}}            
         }
     }
 }

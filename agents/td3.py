@@ -90,7 +90,6 @@ class TD3(BaseAgent):
         self.__hparam_critic_lr = critic_lr
         self.__hparam_actor_lr = actor_lr
         self.__hparam_max_gradient_norm = max_gradient_norm
-        self.__hparam_exploration_noise_scale = exploration_noise_scale
         self.__hparam_target_noise = target_noise
         self.__hparam_target_noise_clip = target_noise_clip
         self.__hparam_critic_loss_fn = critic_loss_fn
@@ -261,8 +260,12 @@ class TD3(BaseAgent):
                 }, commit=False)
         
     def learn_start_callback(self):
-        print("Action space size: ", self.env.action_space.shape)
-        self._action_noise.reset(self.env.action_space.shape)
+        self._action_noise.reset(self.env.action_space.shape[0])
+
+    def learn_start_episode_callback(self, 
+                                     episode):
+        if self._hparam_exploration_noise_type == "OUNoise":
+            self._action_noise.reset(self.env.action_space.shape[0])
 
     def get_action(self,
                    state: np.array,
@@ -278,10 +281,8 @@ class TD3(BaseAgent):
         actions = actions_torch.cpu().numpy()
         
         # Add noise if we are in training mode only
-        if mode == 'train' \
-            and self.__hparam_exploration_noise_scale > 0.0:
-            actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
-                                        size=actions.shape)
+        if mode == 'train':
+            actions += self._action_noise.sample()
         
         # Clip the actions value to the max and min allowed.
         actions = np.clip(actions,

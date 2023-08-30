@@ -206,6 +206,12 @@ class BaseAgent:
         """
         pass
 
+    def learn_start_episode_callback(self,
+                                     episode):
+        """Start of Episode callback. Called at the start of every episode.
+        """
+        pass
+
     def learn_evaluate_callback(self,
                                 num_episodes: int,
                                 render: bool = False) -> (float, float):
@@ -220,6 +226,8 @@ class BaseAgent:
         
         for _ in range(num_episodes):
             
+            self.learn_start_episode_callback(_+1)
+
             state, info = test_env.reset()
             state = state.astype(np.float32)
             if self._hparam_normalize_observations:
