@@ -1,7 +1,7 @@
 from typing import Literal
 from agents.base import BaseAgent
-from replay import ReplayBuffer
-from models import Actor, Critic
+from buffers.replay import ReplayBuffer
+from models.models import Actor, Critic
 import torch.optim as optim
 import numpy as np
 import torch
@@ -260,34 +260,33 @@ class TD3(BaseAgent):
                     "replay/size": self.__exp_replay.replay_size
                 }, commit=False)
         
+    def learn_start_callback(self):
+        print("Action space size: ", self.env.action_space.shape)
+        self._action_noise.reset(self.env.action_space.shape)
 
     def get_action(self,
                    state: np.array,
                    mode: Literal['train', 'eval'] = 'train') -> np.array:
 
-        if mode != "random":
-            # Get the actions prediction from the actor network
-            actions_torch = None
-            
-            with torch.no_grad():
-                self.actor.eval()
-                actions_torch = self.actor(torch.from_numpy(state).to(self.device))
-                self.actor.train()
-            actions = actions_torch.cpu().numpy()
-            
-            # Add noise if we are in training mode only
-            if mode == 'train' \
-                and self.__hparam_exploration_noise_scale > 0.0:
-                actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
-                                            size=actions.shape)
-            
-            # Clip the actions value to the max and min allowed.
-            actions = np.clip(actions,
-                            a_min=self.env.action_space.low,
-                            a_max=self.env.action_space.high)
-        elif mode == "random":
-            actions = np.array([self.env.action_space.sample()])
+        # Get the actions prediction from the actor network
+        actions_torch = None
         
+        with torch.no_grad():
+            self.actor.eval()
+            actions_torch = self.actor(torch.from_numpy(state).to(self.device))
+            self.actor.train()
+        actions = actions_torch.cpu().numpy()
+        
+        # Add noise if we are in training mode only
+        if mode == 'train' \
+            and self.__hparam_exploration_noise_scale > 0.0:
+            actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
+                                        size=actions.shape)
+        
+        # Clip the actions value to the max and min allowed.
+        actions = np.clip(actions,
+                        a_min=self.env.action_space.low,
+                        a_max=self.env.action_space.high)        
         return actions
     
     def __train_step(self, batch_size: int):

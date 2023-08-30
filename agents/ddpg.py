@@ -12,11 +12,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 from collections import namedtuple
 
-from replay import ReplayBuffer
-from models import Critic, Actor
+from buffers.replay import ReplayBuffer
+from models.models import Critic, Actor
 import wandb
 
-from utils import TrialEvaluationCallback
+from utils.optuna_callbacks import TrialEvaluationCallback
 
 from agents.base import BaseAgent
 
@@ -44,7 +44,9 @@ DDPG_DEFAULT_PARAMS = {
     'evaluation_freq_episodes': 200,
     'normalize_observations': True,
     'enable_wandb_logging': True,
-    'logger_title': 'test_logger'
+    'logger_title': 'test_logger',
+    'exploration_noise_type': 'NormalNoise',
+    'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
 }
 
 def sample_ddpg_params(op_trial: optuna.Trial) -> Dict[str, Any]:
@@ -106,7 +108,9 @@ class DDPG(BaseAgent):
                  num_test_episodes: int,
                  evaluation_freq_episodes: int,
                  normalize_observations: bool,
-                 enable_wandb_logging: bool, 
+                 enable_wandb_logging: bool,
+                 exploration_noise_type: Literal['NormalNoise'],
+                 exploration_noise_params: dict, 
                  logger_title: Optional[str] = None):
         
         super().__init__(env_id, 
@@ -119,23 +123,24 @@ class DDPG(BaseAgent):
                          evaluation_freq_episodes,
                          normalize_observations,
                          enable_wandb_logging,
+                         exploration_noise_type,
+                         exploration_noise_params,
                          logger_title)
 
         # Hyper_parameters much have hparam in the variable name.
-        self.__hparam_polyak = polyak
-        self.__hparam_actor_critic_hidden_size = actor_critic_hidden_size
-        self.__hparam_activation = activation
-        self.__hparam_update_batch_size = update_batch_size
-        self.__hparam_update_frequency = update_frequency
-        self.__hparam_update_iterations = update_iterations
-        self.__hparam_critic_lr = critic_lr
-        self.__hparam_actor_lr = actor_lr
-        self.__hparam_max_gradient_norm = max_gradient_norm
-        self.__hparam_exploration_noise_scale = exploration_noise_scale
-        self.__hparam_warm_up_iters = warm_up_iters
-        self.__hparam_critic_loss_fn = critic_loss_fn
+        self._hparam_polyak = polyak
+        self._hparam_actor_critic_hidden_size = actor_critic_hidden_size
+        self._hparam_activation = activation
+        self._hparam_update_batch_size = update_batch_size
+        self._hparam_update_frequency = update_frequency
+        self._hparam_update_iterations = update_iterations
+        self._hparam_critic_lr = critic_lr
+        self._hparam_actor_lr = actor_lr
+        self._hparam_max_gradient_norm = max_gradient_norm
+        self._hparam_exploration_noise_scale = exploration_noise_scale
+        self._hparam_warm_up_iters = warm_up_iters
+        self._hparam_critic_loss_fn = critic_loss_fn
         
-
         # Update the hyper-parameters in wandb config dict
         if self.is_wandb_logging_enabled:
             hyper_params = self.get_hyper_parameters()
@@ -256,7 +261,7 @@ class DDPG(BaseAgent):
         returns_estimated = []
         returns_true = []
 
-        for _ in range(0, self.__hparam_update_iterations):
+        for _ in range(0, self._hparam_update_iterations):
 
             # Sample a batch of transitions from the replay
             num_samples, samples = self.__exp_replay.sample(batch_size)
@@ -299,7 +304,7 @@ class DDPG(BaseAgent):
                 target = rewards + (self.gamma**self.n_step) * dones * Q_s.squeeze(dim=1)
                 Q = self.critic(states, actions).squeeze(dim=1)
 
-                if self.__hparam_critic_loss_fn == 'mse':
+                if self._hparam_critic_loss_fn == 'mse':
                     critic_loss = F.mse_loss(Q, target)
                 else:
                     critic_loss = F.huber_loss(Q, target, delta=1.0)
@@ -307,7 +312,7 @@ class DDPG(BaseAgent):
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
                 # Clip the gradients
-                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.__hparam_max_gradient_norm)
+                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self._hparam_max_gradient_norm)
                 # Update gradients
                 self.critic_optimizer.step()
 
@@ -316,13 +321,13 @@ class DDPG(BaseAgent):
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
                 # Clip the gradients
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.__hparam_max_gradient_norm)
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self._hparam_max_gradient_norm)
                 # Update gradients
                 self.actor_optimizer.step()
                 
                 # Update target network weight
-                self.critic_soft_update(polyak=self.__hparam_polyak)
-                self.actor_soft_update(polyak=self.__hparam_polyak)
+                self.critic_soft_update(polyak=self._hparam_polyak)
+                self.actor_soft_update(polyak=self._hparam_polyak)
 
                 with torch.no_grad():
                     returns_est_mean = Q.mean()
@@ -346,9 +351,9 @@ class DDPG(BaseAgent):
                               transition_tuple: tuple) -> None:
         """Step callback. Called at every step.
         """
-        if step % self.__hparam_update_frequency == 0 \
+        if step % self._hparam_update_frequency == 0 \
             and step > self.warm_up_iters:
-            critic_loss, actor_loss, returns_est, returns_true = self.__train_step(batch_size=self.__hparam_update_batch_size)
+            critic_loss, actor_loss, returns_est, returns_true = self.__train_step(batch_size=self._hparam_update_batch_size)
 
             if self.is_wandb_logging_enabled:
                 self.writer.log({
@@ -358,34 +363,31 @@ class DDPG(BaseAgent):
                     "returns/true_returns": returns_true
                 }, commit=False)
 
+    def learn_start_callback(self):
+        self._action_noise.reset(self.env.action_space.shape[0])
+
     def get_action(self,
                    state: np.array,
-                   mode: Literal['random', 'train', 'eval'] = 'train') -> np.array:
+                   mode: Literal['train', 'eval'] = 'train') -> np.array:
         
-        if mode != "random":
-            # Get the actions prediction from the actor network
-            actions_torch = None
-            
-            with torch.no_grad():
-                self.actor.eval()
-                actions_torch = self.actor(torch.from_numpy(state).to(self.device))
-                self.actor.train()
-            actions = actions_torch.cpu().numpy()
-            
-            # Add noise if we are in training mode only
-            if mode == 'train' \
-                and self.__hparam_exploration_noise_scale > 0.0:
-                actions += np.random.normal(scale=self.__hparam_exploration_noise_scale,
-                                            size=actions.shape)
-            
-            # Clip the actions value to the max and min allowed.
-            actions = np.clip(actions,
-                              a_min=self.env.action_space.low,
-                              a_max=self.env.action_space.high)
-
-        elif mode == 'random':
-            actions = np.array([self.env.action_space.sample()])
-
+        # Get the actions prediction from the actor network
+        actions_torch = None
+        
+        with torch.no_grad():
+            self.actor.eval()
+            actions_torch = self.actor(torch.from_numpy(state).to(self.device))
+            self.actor.train()
+        actions = actions_torch.cpu().numpy()
+        
+        # Add noise if we are in training mode only
+        if mode == 'train' \
+            and self._hparam_exploration_noise_scale > 0.0:
+            actions += self._action_noise.sample()
+        
+        # Clip the actions value to the max and min allowed.
+        actions = np.clip(actions,
+                            a_min=self.env.action_space.low,
+                            a_max=self.env.action_space.high)
         return actions
     
     def load_checkpoint(self, path: str):

@@ -1,6 +1,7 @@
 import os
 import torch
 import random
+import importlib
 import datetime
 import numpy as np
 from tqdm import tqdm
@@ -23,7 +24,9 @@ BASE_AGENT_DEFAULT_PARAMS = {
     'evaluation_freq_episodes': 10,
     'normalize_observations': True,
     'enable_wandb_logging': False,
-    'logger_title': 'test_logger'
+    'logger_title': 'test_logger',
+    'exploration_noise_type': 'NormalNoise',
+    'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
 }
 
 class BaseAgent:
@@ -39,49 +42,58 @@ class BaseAgent:
                  evaluation_freq_episodes: int,
                  normalize_observations: bool,
                  enable_wandb_logging: bool,
-                 logger_title: Optional[str] = None):
-        
+                 exploration_noise_type: Literal['NormalNoise'],
+                 exploration_noise_params: dict,
+                 logger_title: Optional[str] = None,
+                 ):
+        # Hyper_parameters much have hparam in the variable name.
+        self._hparam_seed = seed
         self.__env_str = env_id
         self.__env = gym.make(self.__env_str)
-        # Hyper_parameters much have hparam in the variable name.
-        self.__hparam_seed = seed
-        self.__hparam_gamma = gamma
-        self.__hparam_n_step = n_step
-        self.__hparam_normalize_observations = normalize_observations
-        self.__hparam_num_test_episodes = num_test_episodes
-        self.__enable_wandb_logging = enable_wandb_logging
-        self.__hparam_num_training_episodes = num_training_episodes
-        self.__hparam_evaluation_freq_episodes = evaluation_freq_episodes
-        self.__hparam_warm_up_iters = warm_up_iters
-        self.__device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.__max_mean_test_reward = -float("inf")
-
+        
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
         # Seed python RNG
-        random.seed(self.__hparam_seed)
+        random.seed(self._hparam_seed)
         # Seed numpy RNG
-        np.random.seed(self.__hparam_seed)
+        np.random.seed(self._hparam_seed)
         # seed the RNG for all devices (both CPU and CUDA)
-        torch.manual_seed(self.__hparam_seed)
+        torch.manual_seed(self._hparam_seed)
         # Seed the env
-        self.env.reset(seed=self.__hparam_seed)
+        self.env.reset(seed=self._hparam_seed)
         # Seed the action sampler of the environment
-        self.env.action_space.seed(self.__hparam_seed)
+        self.env.action_space.seed(self._hparam_seed)
+
+        self._hparam_gamma = gamma
+        self._hparam_n_step = n_step
+        self._hparam_normalize_observations = normalize_observations
+        self._hparam_num_test_episodes = num_test_episodes
+        self._enable_wandb_logging = enable_wandb_logging
+        self._hparam_num_training_episodes = num_training_episodes
+        self._hparam_evaluation_freq_episodes = evaluation_freq_episodes
+        self._hparam_warm_up_iters = warm_up_iters
+        self._hparam_exploration_noise_type = exploration_noise_type
+        noise_params = exploration_noise_params[exploration_noise_type]
+        for param in noise_params:
+            setattr(self, '_hparam_exploration_noise_' + param, noise_params[param])
+        module = importlib.import_module("utils.noise")
+        self._action_noise = getattr(module, exploration_noise_type)(**noise_params)
+
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self._max_mean_test_reward = -float("inf")
 
         # Set up wandb Logging
-        
         if self.is_wandb_logging_enabled:
             
             if logger_title is None:
                 raise ValueError("Invalid logger title None.")
             
             todays_date = datetime.datetime.now()
-            self.__wandb_writer = None
+            self._wandb_writer = None
             run_name = self.__class__.__name__ + " " + self.__env.unwrapped.spec.id + "-" + str(todays_date).replace(":","-")
             
-            self.__wandb_writer = wandb.init(project=logger_title,
+            self._wandb_writer = wandb.init(project=logger_title,
                                              config=self.get_hyper_parameters(),
                                              name=run_name)
 
@@ -104,31 +116,31 @@ class BaseAgent:
     
     @property
     def device(self):
-        return self.__device
+        return self._device
     
     @property
     def writer(self):
-        return self.__wandb_writer
+        return self._wandb_writer
     
     @property
     def gamma(self):
-        return self.__hparam_gamma
+        return self._hparam_gamma
     
     @property
     def n_step(self):
-        return self.__hparam_n_step
+        return self._hparam_n_step
 
     @property
     def is_wandb_logging_enabled(self,) -> bool:
-        return self.__enable_wandb_logging
+        return self._enable_wandb_logging
 
     @property
     def max_mean_test_reward(self) -> float:
-        return self.__max_mean_test_reward
+        return self._max_mean_test_reward
     
     @property
     def warm_up_iters(self):
-        return self.__hparam_warm_up_iters
+        return self._hparam_warm_up_iters
     
     def get_hyper_parameters(self):
         hparams = {}
@@ -159,7 +171,7 @@ class BaseAgent:
     
     def get_action(self,
                    state: np.array,
-                   mode: Literal['rando,', 'train', 'eval'] = 'train') -> np.array:
+                   mode: Literal['train', 'eval'] = 'train') -> np.array:
         raise NotImplementedError
     
     def set_wandb_logging_metrics(self) -> None:
@@ -173,6 +185,10 @@ class BaseAgent:
         wandb.define_metric("reward/*", step_metric="episode")
         wandb.define_metric("episode_length/*", step_metric="episode")
 
+    def learn_start_callback(self,):
+        """Learn Start callback. Called at the start of learn function once.
+        """
+        pass
     
     def learn_step_callback(self, 
                             step: int,
@@ -206,7 +222,7 @@ class BaseAgent:
             
             state, info = test_env.reset()
             state = state.astype(np.float32)
-            if self.__hparam_normalize_observations:
+            if self._hparam_normalize_observations:
                 state = self.normalize_observation(state)
 
             done = False
@@ -227,7 +243,7 @@ class BaseAgent:
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = test_env.step(action[0])
                 next_state = next_state.astype(np.float32)
-                if self.__hparam_normalize_observations:
+                if self._hparam_normalize_observations:
                     next_state = self.normalize_observation(next_state)
                 cum_reward += reward
 
@@ -304,15 +320,17 @@ class BaseAgent:
         return buffer_transitions
 
     def learn(self):
+
+        self.learn_start_callback()
         
         # Initialize variables
         total_steps_count = 0
 
-        for episode in tqdm(range(0, self.__hparam_num_training_episodes)):
+        for episode in tqdm(range(0, self._hparam_num_training_episodes)):
             
             state, info = self.env.reset()
             state = state.astype(np.float32)
-            if self.__hparam_normalize_observations:
+            if self._hparam_normalize_observations:
                 state = self.normalize_observation(state)
             
             episode_sum_reward = 0
@@ -330,22 +348,17 @@ class BaseAgent:
                     self.writer.log({
                         "step": total_steps_count
                     }, commit=False)
-
-                if total_steps_count > self.warm_up_iters:
-                    mode = "train"
-                else:
-                    mode = "random"
                 
                 # Get an action to execute
                 action = self.get_action(state,
-                                         mode=mode)
-                
+                                         mode="train")
+
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = self.env.step(action[0])
                 next_state = next_state.astype(np.float32)
                 episode_sum_reward += reward
 
-                if self.__hparam_normalize_observations:
+                if self._hparam_normalize_observations:
                     next_state = self.normalize_observation(next_state)
 
                 # Transition tuple
@@ -365,16 +378,16 @@ class BaseAgent:
             
             # Calculate n-step returns from the transitions
             buffer_transitions = self.__calculate_n_step_returns(episode=epsiode_transitions,
-                                                                 n_step=self.__hparam_n_step,
-                                                                 gamma=self.__hparam_gamma)
+                                                                 n_step=self._hparam_n_step,
+                                                                 gamma=self._hparam_gamma)
             self.learn_episode_callback(episode + 1, 
                                           episode_sum_reward,
                                           episode_length,
                                           buffer_transitions)
             
             # Evaluate agent performance
-            if (episode + 1) % self.__hparam_evaluation_freq_episodes == 0:
-                eval_mean_reward, eval_mean_ep_length = self.learn_evaluate_callback(self.__hparam_num_test_episodes)
+            if (episode + 1) % self._hparam_evaluation_freq_episodes == 0:
+                eval_mean_reward, eval_mean_ep_length = self.learn_evaluate_callback(self._hparam_num_test_episodes)
                 
                 if self.is_wandb_logging_enabled:
                     self.writer.log({
@@ -385,7 +398,7 @@ class BaseAgent:
                 # Save the model checkpoint
                 if eval_mean_reward > self.max_mean_test_reward:
                     
-                    self.__max_mean_test_reward = eval_mean_reward
+                    self._max_mean_test_reward = eval_mean_reward
                     if self.is_wandb_logging_enabled:
                         prefix = "checkpoints/{}/{}/".format(self.__class__.__name__, wandb.run._run_id)
                     else:

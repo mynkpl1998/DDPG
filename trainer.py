@@ -11,7 +11,7 @@ from agents.base import BASE_AGENT_DEFAULT_PARAMS
 
 from hyperparams.params import PARAMS
 
-from utils import TrialEvaluationCallback
+from utils.optuna_callbacks import TrialEvaluationCallback
 
                 
 def objective(op_trial: optuna.Trial):

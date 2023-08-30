@@ -23,8 +23,10 @@ PARAMS = {
             'num_test_episodes': 20,
             'evaluation_freq_episodes': 20,
             'normalize_observations': True,
-            'enable_wandb_logging': True,
-            'logger_title': 'test_logger' 
+            'enable_wandb_logging': False,
+            'logger_title': 'test_logger',
+            'exploration_noise_type': 'NormalNoise',
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
         },
 
         "TD3": 
