@@ -141,7 +141,17 @@ class BaseAgent:
     @property
     def warm_up_iters(self):
         return self._hparam_warm_up_iters
-    
+
+
+    def get_agent_arguments(self,
+                            local_dict: dict,
+                            default_dict: dict):
+        args_dict = {}
+        for key in local_dict:
+            if key in default_dict.keys():
+                args_dict[key] = local_dict[key]
+        return args_dict
+
     def get_hyper_parameters(self):
         hparams = {}
         for name, value in self.__dict__.items():

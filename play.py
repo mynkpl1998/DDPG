@@ -16,25 +16,16 @@ if __name__ == "__main__":
     
     if algo == "DDPG":
         
-        params = DDPG_DEFAULT_PARAMS
-        params['enable_wandb_logging'] = False
-        for param in hyperparams:
-            params[param] = hyperparams[param]
-
-        params["env_id"] = state["env_id"]
-        
-        agent = DDPG(**params)
+        hyperparams['enable_wandb_logging'] = False
+    
+        agent = DDPG(**hyperparams)
         agent.load_checkpoint(args.checkpoint)
         agent.learn_evaluate_callback(num_episodes=10, render=True)
 
     elif algo == "TD3":
-        params = TD3_DEFAULT_PARAMS
-        params['enable_wandb_logging'] = False
-        for param in hyperparams:
-            params[param] = hyperparams[param]
+        hyperparams['enable_wandb_logging'] = False
 
-        params["env_id"] = state["env_id"]
-        agent = TD3(**params)
+        agent = TD3(**hyperparams)
         agent.load_checkpoint(args.checkpoint)
         agent.learn_evaluate_callback(num_episodes=10, render=True)
         

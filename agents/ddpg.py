@@ -107,10 +107,12 @@ class DDPG(BaseAgent):
                  evaluation_freq_episodes: int,
                  normalize_observations: bool,
                  enable_wandb_logging: bool,
-                 exploration_noise_type: Literal['NormalNoise'],
+                 exploration_noise_type: Literal['NormalNoise', 'OUNoise'],
                  exploration_noise_params: dict, 
                  logger_title: Optional[str] = None):
         
+        # Store the object arguments. Required for loading checkpoint
+        self.__agent_args = self.get_agent_arguments(locals(),DDPG_DEFAULT_PARAMS)
         super().__init__(env_id, 
                          seed, 
                          gamma, 
@@ -409,7 +411,6 @@ class DDPG(BaseAgent):
             "actor": self.actor.state_dict(),
             "critic_optimizer": self.critic_optimizer.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "hyper_params": self.get_hyper_parameters(),
+            "hyper_params": self.__agent_args,
             "algo": "DDPG",
-            "env_id": self.env_id
         }, path)

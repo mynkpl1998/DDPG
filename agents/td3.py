@@ -35,7 +35,9 @@ TD3_DEFAULT_PARAMS = {
     'evaluation_freq_episodes': 200,
     'normalize_observations': True,
     'enable_wandb_logging': False,
-    'logger_title': 'test_logger'
+    'logger_title': 'test_logger',
+    'exploration_noise_type': 'NormalNoise',
+    'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
 }
 
 class TD3(BaseAgent):
@@ -56,7 +58,6 @@ class TD3(BaseAgent):
                  critic_lr: float, 
                  actor_lr: float, 
                  max_gradient_norm: float, 
-                 exploration_noise_scale: float,
                  target_noise: float,
                  target_noise_clip: float,
                  num_training_episodes: int, 
@@ -65,6 +66,8 @@ class TD3(BaseAgent):
                  evaluation_freq_episodes: int, 
                  normalize_observations: bool, 
                  enable_wandb_logging: bool, 
+                 exploration_noise_type: Literal['NormalNoise', 'OUNoise'],
+                 exploration_noise_params: dict,
                  logger_title: Optional[str] = None):
         
         super().__init__(env_id, 
@@ -77,8 +80,12 @@ class TD3(BaseAgent):
                          evaluation_freq_episodes,
                          normalize_observations,
                          enable_wandb_logging,
+                         exploration_noise_type,
+                         exploration_noise_params,
                          logger_title)
-
+    
+        # Store the object arguments. Required for loading checkpoint
+        self.__agent_args = self.get_agent_arguments(locals(), TD3_DEFAULT_PARAMS)
         # Hyper_parameters much have hparam in the variable name.
         self.__hparam_polyak = polyak
         self.__hparam_actor_critic_hidden_size = actor_critic_hidden_size
@@ -453,6 +460,7 @@ class TD3(BaseAgent):
 
 
     def save_checkpoint(self, path: str):
+        print(self.__agent_args)
         torch.save({
             "critic_first": self.critic_first.state_dict(),
             "critic_second": self.critic_second.state_dict(),
@@ -460,7 +468,6 @@ class TD3(BaseAgent):
             "first_critic_optimizer": self.critic_optimizer_first.state_dict(),
             "second_critic_optimizer": self.critic_optimizer_second.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "hyper_params": self.get_hyper_parameters(),
+            "hyper_params": self.__agent_args,
             "algo": "TD3",
-            "env_id": self.env_id
         }, path)
