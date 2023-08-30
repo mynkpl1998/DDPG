@@ -15,7 +15,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.mujoco/mujoco210/mujoco-2.3.7/bin/
 source ~/.bashrc
 ```
 
-## Insatlling Python and required dependencies
+## Installing Python and required dependencies
 ```
 wget https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
 bash Miniconda3-py310_23.5.2-0-Linux-x86_64.sh
