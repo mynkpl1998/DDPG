@@ -1,5 +1,11 @@
 import torch
 import torch.nn as nn
+import numpy as np
+
+def fanin_init(size, fanin=None):
+    fanin = fanin or size[0]
+    v = 1. / np.sqrt(fanin)
+    return torch.Tensor(size).uniform_(-v, v)
 
 class Critic(nn.Module):
 
@@ -21,16 +27,16 @@ class Critic(nn.Module):
         else:
             raise NotImplementedError("Activation layer {} is not Supported yet.".format(activation))
 
-        # Create a 3-layered fully connected critic network
-        self.critic = nn.Sequential(
-            nn.Linear(out_features=hidden_size, in_features=observation_dims + action_dims),
-            activation_layer,
-            nn.Linear(out_features=hidden_size, in_features=hidden_size),
-            activation_layer,
-            nn.Linear(out_features=hidden_size, in_features=hidden_size),
-            activation_layer,
-            nn.Linear(out_features=1, in_features=hidden_size)
-        )
+        self.fc1 = nn.Linear(out_features=hidden_size, in_features=observation_dims + action_dims)
+        self.fc2 = nn.Linear(out_features=hidden_size, in_features=hidden_size)
+        self.fc3 = nn.Linear(out_features=1, in_features=hidden_size)
+        self.activation = activation_layer
+        self.init_weights(init_w=3e-3)
+        
+    def init_weights(self, init_w):
+        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
+        self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
+        self.fc3.weight.data.uniform_(-init_w, init_w)
 
     @property
     def observation_dims(self):
@@ -43,9 +49,10 @@ class Critic(nn.Module):
     def forward(self,
                 states: torch.FloatTensor,
                 actions: torch.FloatTensor):
+        
         x = torch.cat((states, actions), 1)
-        x = x.view(-1, self.observation_dims + self.action_dims)
-        return self.critic(x)
+        x = self.fc3(self.activation(self.fc2(self.activation(self.fc1(x)))))
+        return x
 
 class Actor(nn.Module):
 
@@ -67,16 +74,18 @@ class Actor(nn.Module):
         else:
             raise NotImplementedError("Activation layer {} is not Supported yet.".format(activation))
         
-        # Create a 3-layered fully connected actor network
-        self.actor = nn.Sequential(
-            nn.Linear(out_features=hidden_size, in_features=observation_dims),
-            activation_layer,
-            nn.Linear(out_features=hidden_size, in_features=hidden_size),
-            activation_layer,
-            nn.Linear(out_features=hidden_size, in_features=hidden_size),
-            activation_layer,
-            nn.Linear(out_features=action_dims, in_features=hidden_size)
-        )
+        self.fc1 = nn.Linear(out_features=hidden_size, in_features=observation_dims)
+        self.fc2 = nn.Linear(out_features=hidden_size, in_features=hidden_size)
+        self.fc3 = nn.Linear(out_features=action_dims, in_features=hidden_size)
+        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
+        self.activation = activation_layer
+        self.init_weights(init_w=3e-3)
+    
+    def init_weights(self, init_w):
+        self.fc1.weight.data = fanin_init(self.fc1.weight.data.size())
+        self.fc2.weight.data = fanin_init(self.fc2.weight.data.size())
+        self.fc3.weight.data.uniform_(-init_w, init_w)        
     
     @property
     def observation_dims(self):
@@ -88,8 +97,9 @@ class Actor(nn.Module):
     
     def forward(self,
                 states: torch.FloatTensor):
-        states = states.view(-1, self.__observation_dims)
-        return self.actor(states)
+        x = states.view(-1, self.__observation_dims)
+        x = self.fc3(self.activation(self.fc2(self.activation(self.fc1(x)))))
+        return self.tanh(x)
 
 
 if __name__ == "__main__":
