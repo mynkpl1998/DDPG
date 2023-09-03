@@ -44,13 +44,16 @@ class BaseAgent:
                  enable_wandb_logging: bool,
                  exploration_noise_type: Literal['NormalNoise'],
                  exploration_noise_params: dict,
-                 logger_title: Optional[str] = None,
-                 ):
+                 logger_title: Optional[str] = None):
         # Hyper_parameters much have hparam in the variable name.
         self._hparam_seed = seed
         self.__env_str = env_id
         self.__env = gym.make(self.__env_str)
         
+        # Environment with action space [-1, 1] are supported.
+        if self.env.action_space.low.min() < -1.0 or self.env.action_space.high.max() > 1.0:
+            raise ValueError("Only Environment with Action space [-1, 1] are supported.")
+
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
         # Seed python RNG
