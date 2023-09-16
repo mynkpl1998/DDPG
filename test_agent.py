@@ -1,28 +1,24 @@
+import torch
 import gymnasium as gym
+from models.models import SimpleCritic, SimpleActor
 
 if __name__ == "__main__":
+    env = gym.make("Pendulum-v1")
+    obs_space = env.observation_space
+    act_space = env.action_space
     
-    # Test Agent
-    num_test_episodes = 1
-    test_env = env = gym.make("BipedalWalker-v3", hardcore=False, render_mode="human")
+    print(obs_space.shape[0])
+    m = SimpleCritic(observation_type=obs_space,
+                     action_type=act_space,
+                     hidden_size=256)
+    
 
-    for episode in range(0, num_test_episodes):
-
-        test_env.reset()
-        # Keep track of num of steps in episode
-        num_steps = 0
-        
-        done = False
-        while not done:
-            test_env.render()
-            action = test_env.action_space.sample()
-            observation, reward, terminated, truncated, info = test_env.step(action)
-
-            num_steps += 1
-            
-            if terminated or truncated:
-                done = True
-            time.sleep(0.5)
-
-        print("Episodes: {}, Num Steps: {}".format(episode+1, num_steps))
-    test_env.close()
+    a = SimpleActor(observation_type=obs_space,
+                    action_type=act_space,
+                    hidden_size=256)
+    
+    obs, info = env.reset()
+    obs = torch.from_numpy(obs)
+    a.forward(obs)
+    
+    

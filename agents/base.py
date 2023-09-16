@@ -9,6 +9,7 @@ import gymnasium as gym
 import torch.optim as optim
 import torch.nn.functional as F
 from collections import namedtuple
+from models.base import BaseModel
 
 import wandb
 from typing import Literal, Dict, Any, Optional, NamedTuple
@@ -26,7 +27,11 @@ BASE_AGENT_DEFAULT_PARAMS = {
     'enable_wandb_logging': False,
     'logger_title': 'test_logger',
     'exploration_noise_type': 'NormalNoise',
-    'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}}
+    'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.3}},
+    'critic': 'SimpleCritic',
+    'critic_params': {'SimpleCritic': {'hidden_size': 256}},
+    'actor': 'SimpleActor',
+    'actor_params': {'SimpleCritic': {'hidden_size': 256}}
 }
 
 class BaseAgent:
@@ -44,16 +49,16 @@ class BaseAgent:
                  enable_wandb_logging: bool,
                  exploration_noise_type: Literal['NormalNoise'],
                  exploration_noise_params: dict,
+                 critic: BaseModel,
+                 critic_params: dict,
+                 actor: BaseModel,
+                 actor_params: dict,
                  logger_title: Optional[str] = None):
         # Hyper_parameters much have hparam in the variable name.
         self._hparam_seed = seed
         self.__env_str = env_id
         self.__env = gym.make(self.__env_str)
         
-        # Environment with action space [-1, 1] are supported.
-        if self.env.action_space.low.min() < -1.0 or self.env.action_space.high.max() > 1.0:
-            raise ValueError("Only Environment with Action space [-1, 1] are supported.")
-
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
         # Seed python RNG
@@ -81,6 +86,24 @@ class BaseAgent:
             setattr(self, '_hparam_exploration_noise_' + param, noise_params[param])
         module = importlib.import_module("utils.noise")
         self._action_noise = getattr(module, exploration_noise_type)(**noise_params)
+
+        # Load Critic module
+        self._hparam_critic_module = critic
+        critic_params_local = critic_params[critic]
+        for param in critic_params_local:
+            setattr(self, '_hparam_critic_' + param, critic_params_local[param])
+        module = importlib.import_module("models.models")        
+        self._critic_module = getattr(module, critic)
+        self._critic_params = critic_params_local
+
+        # Load Actor module
+        self._hparam_actor_module = actor
+        actor_params_local = actor_params[actor]
+        for param in actor_params_local:
+            setattr(self, '_hparam_actor_' + param, actor_params_local[param])
+        module = importlib.import_module("models.models")        
+        self._actor_module = getattr(module, actor)
+        self._actor_params = actor_params_local
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -182,6 +205,24 @@ class BaseAgent:
         """
         return normalized_obs
     
+    def _post_process_action(self, action):
+        """
+        Maps the values of an array to the range [-1, 1] where the min and max values of the array are known.
+
+        Args:
+            array: The action to be mapped.
+
+        Returns:
+            The mapped array.
+        """
+        return action
+        low = self.env.action_space.low
+        high = self.env.action_space.high
+        new_array = (action - low) / (high - low) * 2 - 1
+        assert new_array.max() <= 1.0
+        assert new_array.min() >= -1.0
+        return new_array
+
     def get_action(self,
                    state: np.array,
                    mode: Literal['train', 'eval'] = 'train') -> np.array:
@@ -260,6 +301,7 @@ class BaseAgent:
                 # Get an action to execute
                 action = self.get_action(state,
                                          mode='eval')
+                action = self._post_process_action(action=action)
                 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = test_env.step(action[0])
@@ -373,6 +415,7 @@ class BaseAgent:
                 # Get an action to execute
                 action = self.get_action(state,
                                          mode="train")
+                action = self._post_process_action(action=action)
 
                 # Perform the action in the environment
                 next_state, reward, terminated, truncated, info = self.env.step(action[0])

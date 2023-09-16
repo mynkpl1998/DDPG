@@ -12,8 +12,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from collections import namedtuple
 
+from models.base import BaseModel
 from buffers.replay import ReplayBuffer
-from models.models import Critic, Actor
 import wandb
 
 from utils.optuna_callbacks import TrialEvaluationCallback
@@ -26,16 +26,15 @@ DDPG_DEFAULT_PARAMS = {
     'seed': 258,
     'replay_size': int(1e6),
     'polyak': 0.9995,
-    'actor_critic_hidden_size': 256,
-    'activation': 'relu',
     'update_batch_size': 256,
     'update_frequency': int(2000),
     'update_iterations': 5,
     'gamma': 0.95,
     'n_step': 10,
-    'critic_lr':1e-4,
-    'actor_lr': 1e-4,
-    'critic_loss_fn': 'hubber',
+    'critic': 'SimpleCritic',
+    'critic_params': {},
+    'actor': 'SimpleActor',
+    'actor_params': {},
     'num_training_episodes': int(50000),
     'warm_up_iters': 10000,
     'max_gradient_norm': 1.0,
@@ -90,16 +89,11 @@ class DDPG(BaseAgent):
                  seed: int,
                  replay_size: int,
                  polyak: float,
-                 actor_critic_hidden_size: int,
-                 critic_loss_fn: Literal['mse', 'hubber'],
-                 activation: Literal['tanh', 'relu'],
                  update_batch_size: int,
                  gamma: float,
                  n_step: int,
                  update_frequency: int,
                  update_iterations: int,
-                 critic_lr: float,
-                 actor_lr: float,
                  max_gradient_norm: float,
                  num_training_episodes: int,
                  warm_up_iters: int,
@@ -108,7 +102,11 @@ class DDPG(BaseAgent):
                  normalize_observations: bool,
                  enable_wandb_logging: bool,
                  exploration_noise_type: Literal['NormalNoise', 'OUNoise'],
-                 exploration_noise_params: dict, 
+                 exploration_noise_params: dict,
+                 critic: BaseModel,
+                 critic_params: dict,
+                 actor: BaseModel,
+                 actor_params: dict,
                  logger_title: Optional[str] = None):
         
         # Store the object arguments. Required for loading checkpoint
@@ -125,20 +123,19 @@ class DDPG(BaseAgent):
                          enable_wandb_logging,
                          exploration_noise_type,
                          exploration_noise_params,
+                         critic,
+                         critic_params,
+                         actor,
+                         actor_params,
                          logger_title)
 
         # Hyper_parameters much have hparam in the variable name.
         self._hparam_polyak = polyak
-        self._hparam_actor_critic_hidden_size = actor_critic_hidden_size
-        self._hparam_activation = activation
         self._hparam_update_batch_size = update_batch_size
         self._hparam_update_frequency = update_frequency
         self._hparam_update_iterations = update_iterations
-        self._hparam_critic_lr = critic_lr
-        self._hparam_actor_lr = actor_lr
         self._hparam_max_gradient_norm = max_gradient_norm
         self._hparam_warm_up_iters = warm_up_iters
-        self._hparam_critic_loss_fn = critic_loss_fn
         
         # Update the hyper-parameters in wandb config dict
         if self.is_wandb_logging_enabled:
@@ -155,33 +152,26 @@ class DDPG(BaseAgent):
         self.__exp_replay = ReplayBuffer(maxsize=replay_size)
 
         # Critic Networks
-
-        self.__critic = Critic(observation_dims=self.env.observation_space.shape[0],
-                                action_dims=self.env.action_space.shape[0],
-                                hidden_size=actor_critic_hidden_size,
-                                activation=activation).to(self.device)
-        
-        self.__critic_target = Critic(observation_dims=self.env.observation_space.shape[0],
-                                       action_dims=self.env.action_space.shape[0],
-                                       hidden_size=actor_critic_hidden_size,
-                                       activation=activation).to(self.device)
-
+        critic_params = {
+            'observation_type': self.env.observation_space,
+            'action_type': self.env.action_space
+        }
+        critic_params.update(self._critic_params)
+        self.__critic = self._critic_module(**critic_params) .to(self.device)
+        self.__critic_target = self._critic_module(**critic_params) .to(self.device)
         self.__critic_optimizer = optim.Adam(self.critic.parameters(),
-                                             lr=critic_lr)
+                                             lr=critic_params['lr'])
         
         # Actor Networks
-        self.__actor = Actor(observation_dims=self.env.observation_space.shape[0],
-                              action_dims=self.env.action_space.shape[0],
-                              hidden_size=actor_critic_hidden_size,
-                              activation=activation).to(self.device)
-
-        self.__actor_target = Actor(observation_dims=self.env.observation_space.shape[0],
-                                     action_dims=self.env.action_space.shape[0],
-                                     hidden_size=actor_critic_hidden_size,
-                                     activation=activation).to(self.device)
-
+        actor_params = {
+            'observation_type': self.env.observation_space,
+            'action_type': self.env.action_space
+        }
+        actor_params.update(self._actor_params)
+        self.__actor = self._actor_module(**actor_params).to(self.device)
+        self.__actor_target = self._actor_module(**actor_params).to(self.device)
         self.__actor_optimizer = optim.Adam(self.actor.parameters(),
-                                            lr=actor_lr)
+                                            lr=actor_params['lr'])
 
         # Initialize target and primary weights to same values.
         self.critic.load_state_dict(self.critic_target.state_dict())
@@ -303,10 +293,12 @@ class DDPG(BaseAgent):
                 target = rewards + (self.gamma**self.n_step) * dones * Q_s.squeeze(dim=1)
                 Q = self.critic(states, actions).squeeze(dim=1)
 
-                if self._hparam_critic_loss_fn == 'mse':
+                if self._critic_params['loss_fn'] == 'mse':
                     critic_loss = F.mse_loss(Q, target)
-                else:
+                elif self._critic_params['loss_fn'] == 'hubber':
                     critic_loss = F.huber_loss(Q, target, delta=1.0)
+                else:
+                    raise NotImplementedError("Loss {} is not implemented yet.".format(self._critic_params['loss_fn']))
 
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()

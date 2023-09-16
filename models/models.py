@@ -1,36 +1,32 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from models.base import BaseModel
+from gymnasium.spaces import Box
 
 def fanin_init(size, fanin=None):
     fanin = fanin or size[0]
     v = 1. / np.sqrt(fanin)
     return torch.Tensor(size).uniform_(-v, v)
 
-class Critic(nn.Module):
+class SimpleCritic(BaseModel):
 
     def __init__(self,
-                 observation_dims: int,
-                 action_dims: int,
+                 observation_type: Box,
+                 action_type: Box,
                  hidden_size: int,
-                 activation: str):
+                 **kwargs):
         
-        super(Critic, self).__init__()
-        self.__observation_dims = observation_dims
-        self.__action_dims = action_dims
+        super(SimpleCritic, self).__init__(observation_type=observation_type,
+                                           action_type=action_type)
+        
+        self.__observation_dims = observation_type.shape[0]
+        self.__action_dims = action_type.shape[0]
 
-        activation_layer = None
-        if activation == 'relu':
-            activation_layer = nn.ReLU()
-        elif activation == 'tanh':
-            activation_layer = nn.Tanh()
-        else:
-            raise NotImplementedError("Activation layer {} is not Supported yet.".format(activation))
-
-        self.fc1 = nn.Linear(out_features=hidden_size, in_features=observation_dims + action_dims)
+        self.fc1 = nn.Linear(out_features=hidden_size, in_features=self.__observation_dims + self.__action_dims)
         self.fc2 = nn.Linear(out_features=hidden_size, in_features=hidden_size)
         self.fc3 = nn.Linear(out_features=1, in_features=hidden_size)
-        self.activation = activation_layer
+        self.activation = nn.ReLU()
         self.init_weights(init_w=3e-3)
         
     def init_weights(self, init_w):
@@ -54,32 +50,31 @@ class Critic(nn.Module):
         x = self.fc3(self.activation(self.fc2(self.activation(self.fc1(x)))))
         return x
 
-class Actor(nn.Module):
+class SimpleActor(BaseModel):
 
     def __init__(self,
-                 observation_dims: int,
-                 action_dims: int,
+                 observation_type: Box,
+                 action_type: Box,
                  hidden_size: int,
-                 activation: str):
+                 **kwargs):
         
-        super(Actor, self).__init__()
-        self.__observation_dims = observation_dims
-        self.__action_dims = action_dims
+        super(SimpleActor, self).__init__(observation_type,
+                                          action_type)
 
-        activation_layer = None
-        if activation == 'relu':
-            activation_layer = nn.ReLU()
-        elif activation == 'tanh':
-            activation_layer = nn.Tanh()
-        else:
-            raise NotImplementedError("Activation layer {} is not Supported yet.".format(activation))
+        self.__observation_dims = observation_type.shape[0]
+        self.__action_dims = action_type.shape[0]
+
+        # Action Lower Bound
+        self._action_lower_bound = torch.FloatTensor(action_type.low)
+        self._action_upper_bound = torch.FloatTensor(action_type.high)
+        assert torch.equal(-self._action_lower_bound, self._action_upper_bound)
         
-        self.fc1 = nn.Linear(out_features=hidden_size, in_features=observation_dims)
+        self.fc1 = nn.Linear(out_features=hidden_size, in_features=observation_type.shape[0])
         self.fc2 = nn.Linear(out_features=hidden_size, in_features=hidden_size)
-        self.fc3 = nn.Linear(out_features=action_dims, in_features=hidden_size)
+        self.fc3 = nn.Linear(out_features=action_type.shape[0], in_features=hidden_size)
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
-        self.activation = activation_layer
+        self.activation = nn.ReLU()
         self.init_weights(init_w=3e-3)
     
     def init_weights(self, init_w):
@@ -97,9 +92,16 @@ class Actor(nn.Module):
     
     def forward(self,
                 states: torch.FloatTensor):
+        
+        if self._action_upper_bound.device != states.device:
+            self._action_upper_bound = self._action_upper_bound.device()
+        
         x = states.view(-1, self.__observation_dims)
         x = self.fc3(self.activation(self.fc2(self.activation(self.fc1(x)))))
-        return self.tanh(x)
+        # Let the model learn the interpolation function from [-1, 1] to [action_high, action_low]
+        x = self.tanh(x) * self._action_upper_bound
+        return x
+
 
 
 if __name__ == "__main__":
@@ -116,18 +118,18 @@ if __name__ == "__main__":
     
 
     # Test Critic
-    critic = Critic(observation_dims=obs_dims,
-                    action_dims=action_dims,
-                    hidden_size=hidden_size,
-                    activation='relu').to(device)
+    critic = SimpleCritic(observation_dims=obs_dims,
+                          action_dims=action_dims,
+                          hidden_size=hidden_size,
+                          activation='relu').to(device)
 
     out = critic(random_obs, random_act)
     
 
     # Test actor
-    actor = Actor(observation_dims=obs_dims,
-                  action_dims=action_dims,
-                  hidden_size=hidden_size,
-                  activation='tanh').to(device)
+    actor = SimpleActor(observation_dims=obs_dims,
+                        action_dims=action_dims,
+                        hidden_size=hidden_size,
+                        activation='tanh').to(device)
     out = actor(random_obs)
 

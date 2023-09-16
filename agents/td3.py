@@ -1,7 +1,6 @@
 from typing import Literal
 from agents.base import BaseAgent
 from buffers.replay import ReplayBuffer
-from models.models import Actor, Critic
 import torch.optim as optim
 import numpy as np
 import torch
