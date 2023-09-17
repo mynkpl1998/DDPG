@@ -17,14 +17,14 @@ if __name__ == "__main__":
     if algo == "DDPG":
         
         hyperparams['enable_wandb_logging'] = False
-    
+        hyperparams['render'] = True
         agent = DDPG(**hyperparams)
         agent.load_checkpoint(args.checkpoint)
         agent.learn_evaluate_callback(num_episodes=10, render=True)
 
     elif algo == "TD3":
         hyperparams['enable_wandb_logging'] = False
-
+        hyperparams['render'] = True
         agent = TD3(**hyperparams)
         agent.load_checkpoint(args.checkpoint)
         agent.learn_evaluate_callback(num_episodes=10, render=True)

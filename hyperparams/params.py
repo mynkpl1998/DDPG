@@ -3,6 +3,7 @@ PARAMS = {
     { 
         "DDPG": 
         {   'env_id': "Pendulum-v1",
+            'render': False,
             'seed': 258,
             'replay_size': int(1e6),
             'polyak': 0.995,
@@ -139,6 +140,38 @@ PARAMS = {
             'normalize_observations': False,
             'enable_wandb_logging': True,
             'logger_title': 'noise_logger',
+            'actor': 'SimpleActor',
+            'actor_params': {'SimpleActor': {'hidden_size': 256, 'lr': 1e-3}},
+            'critic': 'SimpleCritic',
+            'critic_params': {'SimpleCritic': {'hidden_size': 256, 'lr': 1e-3, 'loss_fn': 'hubber'}},
+            'exploration_noise_type': 'NormalNoise',
+            'exploration_noise_params': {'NormalNoise': {'mu': 0.0, 'sigma': 0.2},
+                                         'OUNoise': {'mu': 0.0, 'sigma': 0.2, 'theta': 0.15}}            
+        }
+    },
+
+    "sumo/v2i-v0":
+    {
+        "DDPG":
+        {
+            'env_id': "sumo/v2i-v0",
+            'render': False,
+            'seed': 258,
+            'replay_size': int(1e6),
+            'polyak': 0.995,
+            'update_batch_size': 256,
+            'update_frequency': int(2),
+            'update_iterations': 1,
+            'gamma': 0.98,
+            'n_step': 5,
+            'num_training_episodes': int(10000),
+            'warm_up_iters': 20000,
+            'max_gradient_norm': 1.0,
+            'num_test_episodes': 20,
+            'evaluation_freq_episodes': 100,
+            'normalize_observations': False,
+            'enable_wandb_logging': True,
+            'logger_title': 'sumo_v2x',
             'actor': 'SimpleActor',
             'actor_params': {'SimpleActor': {'hidden_size': 256, 'lr': 1e-3}},
             'critic': 'SimpleCritic',

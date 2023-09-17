@@ -1,5 +1,6 @@
 import os
 import torch
+import sumo
 import random
 import importlib
 import datetime
@@ -16,6 +17,7 @@ from typing import Literal, Dict, Any, Optional, NamedTuple
 
 BASE_AGENT_DEFAULT_PARAMS = {
     'env_id': "BipedalWalker-v3",
+    'render': False,
     'seed': 258,
     'gamma': 0.9,
     'n_step': 1,
@@ -38,6 +40,7 @@ class BaseAgent:
 
     def __init__(self,
                  env_id: str,
+                 render: bool,
                  seed: int,
                  gamma: float,
                  n_step: int,
@@ -57,8 +60,10 @@ class BaseAgent:
         # Hyper_parameters much have hparam in the variable name.
         self._hparam_seed = seed
         self.__env_str = env_id
-        self.__env = gym.make(self.__env_str)
-        
+        if render:
+            self.__env = gym.make(self.__env_str, render_mode="human")
+        else:
+            self.__env = gym.make(self.__env_str)
         # Set the seed of the pseudo-random generators
         # (python, numpy, pytorch, gym, action_space)
         # Seed python RNG
@@ -273,10 +278,7 @@ class BaseAgent:
         """
         eval_episode_reward = []
         eval_episode_length = []
-        if render:
-            test_env = gym.make(self.__env_str, render_mode="human")
-        else:
-            test_env = gym.make(self.__env_str)
+        test_env = self.env
         
         for _ in range(num_episodes):
             
@@ -471,7 +473,7 @@ class BaseAgent:
                     if not os.path.exists(prefix):
                         os.makedirs(prefix)
                     
-                    check_point_name = self.env_id + "_" + self.__class__.__name__ + "_{}_episode_".format(episode+1) + "{:.2f}_mean_reward_checkpoint.pkt".format(eval_mean_reward)
+                    check_point_name = self.env_id.replace("/", "_") + "_" + self.__class__.__name__ + "_{}_episode_".format(episode+1) + "{:.2f}_mean_reward_checkpoint.pkt".format(eval_mean_reward)
                     self.save_checkpoint(prefix + check_point_name)
                     
                     if self.is_wandb_logging_enabled:

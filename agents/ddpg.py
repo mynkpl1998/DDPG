@@ -23,6 +23,7 @@ from agents.base import BaseAgent
 
 DDPG_DEFAULT_PARAMS = {
     'env_id': "BipedalWalker-v3",
+    'render': False,
     'seed': 258,
     'replay_size': int(1e6),
     'polyak': 0.9995,
@@ -86,6 +87,7 @@ class DDPG(BaseAgent):
 
     def __init__(self,
                  env_id: str,
+                 render: bool,
                  seed: int,
                  replay_size: int,
                  polyak: float,
@@ -111,7 +113,8 @@ class DDPG(BaseAgent):
         
         # Store the object arguments. Required for loading checkpoint
         self.__agent_args = self.get_agent_arguments(locals(),DDPG_DEFAULT_PARAMS)
-        super().__init__(env_id, 
+        super().__init__(env_id,
+                         render,
                          seed, 
                          gamma, 
                          n_step, 
